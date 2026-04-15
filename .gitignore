@@ -1,0 +1,7 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+vendor/
+event-generator/event-generator
+event-generator/smart-delivery-gen
