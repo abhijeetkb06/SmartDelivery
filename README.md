@@ -77,7 +77,7 @@ The Go-based event generator uses a **producer-consumer pattern** with the Couch
 - **40 parallel worker goroutines** consuming from a buffered channel
 - **Batch writes of 100 documents** per bulk operation
 - **Atomic counters** for real-time throughput metrics
-- Result: **3,000+ ops/sec** sustained (570x faster than individual upserts)
+- Result: **40k to 80,000+ ops/sec** sustained depending on network speed (570x faster than individual upserts)
 
 ```bash
 cd event-generator
