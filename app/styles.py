@@ -279,14 +279,61 @@ def risk_bar_html(score: float) -> str:
     )
 
 
+# ── Inline SVG Icon System ──────────────────────────────────────
+# Professional inline SVG stroke icons — no emoji dependencies.
+
+_SVG_PATHS = {
+    "check-circle": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    "home": '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+    "car": '<path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1-1-1h-2l-3-5H7L4 12H2c-.3 0-1 .1-1 1v3c0 .6.4 1 1 1h2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',
+    "door-open": '<path d="M13 4h3a2 2 0 0 1 2 2v14"/><path d="M2 20h3"/><path d="M13 20h9"/><path d="M10 12v.01"/><path d="M13 4.562v16.157a1 1 0 0 1-1.242.97L5 20V5.562a2 2 0 0 1 1.515-1.94l4-1A2 2 0 0 1 13 4.561Z"/>',
+    "package": '<path d="M16.5 9.4 7.55 4.24"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/>',
+    "package-x": '<path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><path d="m7.5 4.27 9 5.15"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/><path d="m17 13 5 5m-5 0 5-5"/>',
+    "clock": '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    "alert-triangle": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><line x1="12" x2="12" y1="9" y2="13"/><line x1="12" x2="12.01" y1="17" y2="17"/>',
+    "shield-alert": '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 .5-.87l7-4a1 1 0 0 1 1 0l7 4A1 1 0 0 1 20 6z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+    "truck": '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>',
+    "lock": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+    "unlock": '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>',
+    "bell": '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+    "user": '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+    "user-x": '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="17" x2="22" y1="8" y2="13"/><line x1="22" x2="17" y1="8" y2="13"/>',
+    "camera": '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/>',
+    "x-circle": '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/>',
+    "arrow-right": '<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+    "cpu": '<rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/>',
+    "map-pin": '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
+    "zap": '<path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/>',
+    "eye": '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+    "clipboard": '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>',
+}
+
+
+def icon(name: str, size: int = 16, color: str = "currentColor") -> str:
+    """Return an inline SVG icon string for use in HTML markup."""
+    path_d = _SVG_PATHS.get(name, _SVG_PATHS["package"])
+    return (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
+        f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round" '
+        f'style="display:inline-block;vertical-align:middle;">{path_d}</svg>'
+    )
+
+
 # ── Icon / name helpers ─────────────────────────────────────────
 _EVENT_ICONS = {
-    "delivery_window_start": "🕐", "delivery_window_end": "🕐",
-    "person_detected": "👤", "unknown_person": "🕵️",
-    "door_open": "🚪", "door_close": "🔒", "door_stuck": "⚠️",
-    "camera_motion": "📹", "package_detected": "📦",
-    "package_not_detected": "❌", "delivery_confirmed": "✅",
-    "delivery_timeout": "⏰",
+    "delivery_window_start": "clock",
+    "delivery_window_end": "clock",
+    "person_detected": "user",
+    "unknown_person": "user-x",
+    "door_open": "door-open",
+    "door_close": "lock",
+    "door_stuck": "alert-triangle",
+    "camera_motion": "camera",
+    "package_detected": "package",
+    "package_not_detected": "x-circle",
+    "delivery_confirmed": "check-circle",
+    "delivery_timeout": "clock",
 }
 
 _EVENT_COLORS = {
@@ -299,10 +346,23 @@ _EVENT_COLORS = {
 }
 
 _SCENARIO_ICONS = {
-    "happy_path": "✅", "front_door_misdelivery": "🏠",
-    "package_behind_car": "🚗", "door_stuck_open": "🚪",
-    "no_package_placed": "📭", "delivery_timeout": "⏰",
-    "theft_suspicious": "🚨",
+    "happy_path": "check-circle",
+    "front_door_misdelivery": "home",
+    "package_behind_car": "car",
+    "door_stuck_open": "door-open",
+    "no_package_placed": "package-x",
+    "delivery_timeout": "clock",
+    "theft_suspicious": "shield-alert",
+}
+
+_SCENARIO_COLORS = {
+    "happy_path": "#4ade80",
+    "front_door_misdelivery": "#fbbf24",
+    "package_behind_car": "#f87171",
+    "door_stuck_open": "#f97316",
+    "no_package_placed": "#a78bfa",
+    "delivery_timeout": "#fbbf24",
+    "theft_suspicious": "#ef4444",
 }
 
 _SCENARIO_NAMES = {
@@ -313,14 +373,18 @@ _SCENARIO_NAMES = {
 }
 
 
-def event_icon(event_type: str) -> str:
-    return _EVENT_ICONS.get(event_type, "📋")
+def event_icon(event_type: str, size: int = 16) -> str:
+    name = _EVENT_ICONS.get(event_type, "clipboard")
+    color = _EVENT_COLORS.get(event_type, "#6366f1")
+    return icon(name, size=size, color=color)
 
 def event_color(event_type: str) -> str:
     return _EVENT_COLORS.get(event_type, "#6366f1")
 
-def scenario_icon(scenario_type: str) -> str:
-    return _SCENARIO_ICONS.get(scenario_type, "📦")
+def scenario_icon(scenario_type: str, size: int = 16) -> str:
+    name = _SCENARIO_ICONS.get(scenario_type, "package")
+    color = _SCENARIO_COLORS.get(scenario_type, "#94a3b8")
+    return icon(name, size=size, color=color)
 
 def scenario_friendly_name(scenario_type: str) -> str:
     return _SCENARIO_NAMES.get(scenario_type, scenario_type.replace("_", " ").title())

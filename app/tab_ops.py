@@ -18,6 +18,7 @@ from couchbase.exceptions import CouchbaseException
 
 import couchbase_client as cb
 from config import CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_PROCESSED
+from styles import icon
 
 _SEVERITY_COLORS = {"critical": "#ef4444", "high": "#f97316", "medium": "#fbbf24", "low": "#6366f1"}
 _GEN_BIN = Path(__file__).resolve().parent.parent / "event-generator" / "smart-delivery-gen"
@@ -216,25 +217,25 @@ def render(cluster: Cluster):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         st.markdown(f"""<div class="stat-card">
-            <div class="stat-icon">&#127968;</div>
+            <div class="stat-icon">{icon("home", size=22, color="#818cf8")}</div>
             <div class="stat-value">{homes_count:,}</div>
             <div class="stat-label">Homes Monitored</div>
         </div>""", unsafe_allow_html=True)
     with c2:
         st.markdown(f"""<div class="stat-card">
-            <div class="stat-icon">&#128230;</div>
+            <div class="stat-icon">{icon("package", size=22, color="#818cf8")}</div>
             <div class="stat-value">{total_deliveries:,}</div>
             <div class="stat-label">Total Deliveries</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""<div class="stat-card">
-            <div class="stat-icon">&#128680;</div>
+            <div class="stat-icon">{icon("shield-alert", size=22, color="#818cf8")}</div>
             <div class="stat-value">{total_alerts:,}</div>
             <div class="stat-label">Alerts Triggered</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         st.markdown(f"""<div class="stat-card">
-            <div class="stat-icon">&#129302;</div>
+            <div class="stat-icon">{icon("cpu", size=22, color="#818cf8")}</div>
             <div class="stat-value">{ai_ready:,}</div>
             <div class="stat-label">AI-Ready Records</div>
         </div>""", unsafe_allow_html=True)
@@ -243,7 +244,7 @@ def render(cluster: Cluster):
     if not is_live:
         proc_stats = cb.get_processing_stats(cluster)
 
-    st.markdown('<div class="section-title">&#9889; Live Pipeline Performance</div>',
+    st.markdown(f'<div class="section-title">{icon("zap", size=18, color="#fbbf24")} Live Pipeline Performance</div>',
                 unsafe_allow_html=True)
 
     if is_live:
@@ -298,13 +299,13 @@ def render(cluster: Cluster):
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{rate:.0f} ops/s</div>
                     <div style="font-size:0.68rem;color:#64748b;">Go Event Generator</div>
                 </div>
-                <div style="font-size:1.5rem;color:#6366f1;">&#10132;</div>
+                <div style="line-height:1;">{icon("arrow-right", size=24, color="#6366f1")}</div>
                 <div style="text-align:center;padding:0.5rem 1rem;background:rgba(99,102,241,0.1);border-radius:8px;border:1px solid rgba(99,102,241,0.3);">
                     <div style="font-size:0.72rem;color:#6366f1;font-weight:600;">EVENTING</div>
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{proc_cnt:,} enriched</div>
                     <div style="font-size:0.68rem;color:#64748b;">PII Redact + Enrich + Embed</div>
                 </div>
-                <div style="font-size:1.5rem;color:#6366f1;">&#10132;</div>
+                <div style="line-height:1;">{icon("arrow-right", size=24, color="#6366f1")}</div>
                 <div style="text-align:center;padding:0.5rem 1rem;background:rgba(34,197,94,0.1);border-radius:8px;border:1px solid rgba(34,197,94,0.3);">
                     <div style="font-size:0.72rem;color:#22c55e;font-weight:600;">AI-READY</div>
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{ai_ready:,} records</div>
@@ -333,13 +334,13 @@ def render(cluster: Cluster):
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{raw_cnt:,} deliveries</div>
                     <div style="font-size:0.68rem;color:#64748b;">Raw Events (rawdata scope)</div>
                 </div>
-                <div style="font-size:1.5rem;color:#6366f1;">&#10132;</div>
+                <div style="line-height:1;">{icon("arrow-right", size=24, color="#6366f1")}</div>
                 <div style="text-align:center;padding:0.5rem 1rem;background:rgba(99,102,241,0.1);border-radius:8px;border:1px solid rgba(99,102,241,0.3);">
                     <div style="font-size:0.72rem;color:#6366f1;font-weight:600;">EVENTING</div>
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{proc_cnt:,} enriched</div>
                     <div style="font-size:0.68rem;color:#64748b;">PII Redact + Enrich + Embed</div>
                 </div>
-                <div style="font-size:1.5rem;color:#6366f1;">&#10132;</div>
+                <div style="line-height:1;">{icon("arrow-right", size=24, color="#6366f1")}</div>
                 <div style="text-align:center;padding:0.5rem 1rem;background:rgba(34,197,94,0.1);border-radius:8px;border:1px solid rgba(34,197,94,0.3);">
                     <div style="font-size:0.72rem;color:#22c55e;font-weight:600;">AI-READY</div>
                     <div style="font-size:1.2rem;font-weight:700;color:#e2e8f0;">{ai_ready:,} records</div>
@@ -352,7 +353,7 @@ def render(cluster: Cluster):
         </div>""", unsafe_allow_html=True)
 
     # ── Section 3: PII Redaction Showcase ───────────────────────
-    st.markdown('<div class="section-title">&#128274; Automatic Name Redaction by Couchbase Eventing</div>',
+    st.markdown(f'<div class="section-title">{icon("lock", size=18, color="#818cf8")} Automatic Name Redaction by Couchbase Eventing</div>',
                 unsafe_allow_html=True)
     st.markdown(
         '<div class="section-subtitle">Homeowner names are redacted so the command center '
@@ -373,7 +374,7 @@ def render(cluster: Cluster):
 
         st.markdown(f"""<div class="pii-comparison">
             <div class="pii-raw-card">
-                <div class="pii-label pii-label-raw">&#128274; Raw Data (rawdata scope)</div>
+                <div class="pii-label pii-label-raw">{icon("unlock", size=14, color="#f87171")} Raw Data (rawdata scope)</div>
                 <div class="pii-field">
                     <span class="pii-field-name">Homeowner</span>
                     <span class="pii-field-value-raw">{raw_name}</span>
@@ -391,12 +392,12 @@ def render(cluster: Cluster):
                     <span style="font-size:0.85rem;color:#94a3b8;">{raw.get('carrier','')}</span>
                 </div>
                 <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(239,68,68,0.15);font-size:0.72rem;color:#f87171;">
-                    &#9888;&#65039; Contains homeowner PII &mdash; ops shouldn&#39;t see names
+                    {icon("alert-triangle", size=13, color="#f87171")} Contains homeowner PII &mdash; ops shouldn&#39;t see names
                 </div>
             </div>
-            <div class="pii-arrow">&#10132;</div>
+            <div class="pii-arrow">{icon("arrow-right", size=24, color="#6366f1")}</div>
             <div class="pii-safe-card">
-                <div class="pii-label pii-label-safe">&#9989; AI-Ready Data (processeddata scope)</div>
+                <div class="pii-label pii-label-safe">{icon("check-circle", size=14, color="#4ade80")} AI-Ready Data (processeddata scope)</div>
                 <div class="pii-field">
                     <span class="pii-field-name">Homeowner</span>
                     <span class="pii-field-value-safe">{proc_name}</span>
@@ -414,7 +415,7 @@ def render(cluster: Cluster):
                     <span style="font-size:0.85rem;color:#94a3b8;">{raw.get('carrier','')}</span>
                 </div>
                 <div style="margin-top:0.75rem;padding-top:0.5rem;border-top:1px solid rgba(34,197,94,0.15);font-size:0.72rem;color:#4ade80;">
-                    &#9989; Name redacted + address kept for ops + AI narrative + vector embedding
+                    {icon("check-circle", size=13, color="#4ade80")} Name redacted + address kept for ops + AI narrative + vector embedding
                 </div>
             </div>
         </div>""", unsafe_allow_html=True)
@@ -427,7 +428,7 @@ def render(cluster: Cluster):
             unsafe_allow_html=True)
 
     # ── Section 4: Alert Feed ───────────────────────────────────
-    st.markdown('<div class="section-title">&#128680; Alert Feed</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="section-title">{icon("shield-alert", size=18, color="#ef4444")} Alert Feed</div>', unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
     with fc1:
         severity_filter = st.selectbox("Severity", ["All", "critical", "high", "medium", "low"],

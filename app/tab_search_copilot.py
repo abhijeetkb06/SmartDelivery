@@ -8,7 +8,7 @@ from openai import OpenAI
 
 import couchbase_client as cb
 from config import OPENAI_API_KEY, EMBEDDING_MODEL, CHAT_MODEL, CB_BUCKET, SCOPE_PROCESSED
-from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scenario_friendly_name
+from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scenario_friendly_name, icon
 
 
 # ── Vector Search Tab ───────────────────────────────────────────
@@ -156,10 +156,10 @@ def render_search(cluster):
                         </div>
                         <div class="result-summary">{summary[:250]}{"..." if len(summary) > 250 else ""}</div>
                         <div class="result-details">
-                            <span class="detail-item">🚚 {r.get('carrier', 'N/A')}</span>
-                            <span class="detail-item">📍 {r.get('address', 'N/A')}</span>
-                            <span class="detail-item">⚠️ Risk: {risk_score:.0%}</span>
-                            <span class="detail-item" style="color:#4ade80;">👤 {r.get('owner_name', 'N/A')}</span>
+                            <span class="detail-item">{icon("truck", size=14, color="#94a3b8")} {r.get('carrier', 'N/A')}</span>
+                            <span class="detail-item">{icon("map-pin", size=14, color="#94a3b8")} {r.get('address', 'N/A')}</span>
+                            <span class="detail-item">{icon("alert-triangle", size=14, color="#fbbf24")} Risk: {risk_score:.0%}</span>
+                            <span class="detail-item" style="color:#4ade80;">{icon("user", size=14, color="#4ade80")} {r.get('owner_name', 'N/A')}</span>
                         </div>
                     </div>
                     <div style="text-align: right;">

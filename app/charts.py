@@ -1,6 +1,7 @@
 """HTML UI builders for SmartDelivery delivery comparisons."""
 
 from __future__ import annotations
+from styles import icon
 
 
 def create_notification_comparison_html(delivery: dict | None = None) -> str:
@@ -13,26 +14,27 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
     # ── Left side: raw event list (Today's myQ) ──
     timeline = delivery.get("event_timeline", [])
     event_lines = []
+    _evt_icons = {
+        "delivery_window_start": icon("clock", size=16, color="#64748b"),
+        "person_detected": icon("user", size=16, color="#fbbf24"),
+        "door_open": icon("door-open", size=16, color="#6366f1"),
+        "door_close": icon("lock", size=16, color="#6366f1"),
+        "camera_motion": icon("camera", size=16, color="#22d3ee"),
+        "package_detected": icon("package", size=16, color="#22c55e"),
+        "delivery_confirmed": icon("check-circle", size=16, color="#22c55e"),
+        "unknown_person": icon("user-x", size=16, color="#f97316"),
+    }
+    _evt_default = icon("clipboard", size=16, color="#64748b")
     for evt in timeline:
         evt_type = evt.get("event_type", "event")
         summary = evt.get("summary", "")
         ts = evt.get("timestamp", "")
         time_str = ts[11:16] if len(ts) >= 16 else ts
-        # Icon per event type
-        icon = {
-            "delivery_window_start": "&#128336;",
-            "person_detected": "&#128100;",
-            "door_open": "&#128682;",
-            "door_close": "&#128274;",
-            "camera_motion": "&#128249;",
-            "package_detected": "&#128230;",
-            "delivery_confirmed": "&#9989;",
-            "unknown_person": "&#9888;&#65039;",
-        }.get(evt_type, "&#128161;")
+        evt_icon = _evt_icons.get(evt_type, _evt_default)
         event_lines.append(
             f'<div style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0;'
             f'border-bottom:1px solid rgba(100,116,139,0.1);">'
-            f'<span style="font-size:1rem;">{icon}</span>'
+            f'<span style="font-size:1rem;line-height:1;">{evt_icon}</span>'
             f'<span style="font-size:0.82rem;color:#cbd5e1;flex:1;">{summary}</span>'
             f'<span style="font-size:0.72rem;color:#94a3b8;">{time_str}</span></div>'
         )
@@ -51,14 +53,14 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
 
     # Status badges
     if risk_score >= 0.75:
-        risk_label = f'<span class="notif-tag" style="color:#f87171;">&#9888;&#65039; Risk: {risk_score:.0%}</span>'
-        safe_label = '<span class="notif-tag" style="color:#f87171;">&#128680; Critical</span>'
+        risk_label = f'<span class="notif-tag" style="color:#f87171;">{icon("alert-triangle", size=13, color="#f87171")} Risk: {risk_score:.0%}</span>'
+        safe_label = f'<span class="notif-tag" style="color:#f87171;">{icon("shield-alert", size=13, color="#f87171")} Critical</span>'
     elif risk_score >= 0.45:
-        risk_label = f'<span class="notif-tag" style="color:#fbbf24;">&#9888;&#65039; Risk: {risk_score:.0%}</span>'
-        safe_label = '<span class="notif-tag" style="color:#fbbf24;">&#9888; At Risk</span>'
+        risk_label = f'<span class="notif-tag" style="color:#fbbf24;">{icon("alert-triangle", size=13, color="#fbbf24")} Risk: {risk_score:.0%}</span>'
+        safe_label = f'<span class="notif-tag" style="color:#fbbf24;">{icon("alert-triangle", size=13, color="#fbbf24")} At Risk</span>'
     else:
-        risk_label = f'<span class="notif-tag" style="color:#22c55e;">&#9889; Risk: {risk_score:.0%}</span>'
-        safe_label = '<span class="notif-tag" style="color:#4ade80;">&#9989; Safe</span>'
+        risk_label = f'<span class="notif-tag" style="color:#22c55e;">{icon("zap", size=13, color="#22c55e")} Risk: {risk_score:.0%}</span>'
+        safe_label = f'<span class="notif-tag" style="color:#4ade80;">{icon("check-circle", size=13, color="#4ade80")} Safe</span>'
 
     location = delivery.get("delivery_location", "garage").replace("_", " ").title()
 
@@ -67,7 +69,7 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
             <div class="ba-label ba-label-before">Today's myQ</div>
             <div class="ba-notification ba-notif-plain">
                 <div style="font-size:0.82rem;font-weight:600;color:#fbbf24;margin-bottom:0.5rem;">
-                    &#128276; myQ Notifications</div>
+                    {icon("bell", size=15, color="#fbbf24")} myQ Notifications</div>
                 {events_html}
                 <div style="margin-top:0.6rem;padding-top:0.5rem;border-top:1px dashed rgba(100,116,139,0.2);">
                     <div style="font-size:0.72rem;color:#94a3b8;line-height:1.5;">
@@ -77,13 +79,13 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
             <div class="ba-label ba-label-after">myQ + Couchbase Intelligence</div>
             <div class="ba-notification ba-notif-smart">
                 <div style="font-size:0.82rem;font-weight:600;color:#4ade80;margin-bottom:0.5rem;">
-                    &#128230; Smart Delivery Alert</div>
+                    {icon("package", size=15, color="#4ade80")} Smart Delivery Alert</div>
                 <div style="font-size:0.85rem;color:#e2e8f0;line-height:1.5;">
                     {knowledge}</div>
                 <div style="margin-top:0.6rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                     {safe_label}
-                    <span class="notif-tag" style="color:#94a3b8;">&#127968; {location}</span>
-                    <span class="notif-tag" style="color:#94a3b8;">&#128666; {carrier}</span>
+                    <span class="notif-tag" style="color:#94a3b8;">{icon("home", size=13, color="#94a3b8")} {location}</span>
+                    <span class="notif-tag" style="color:#94a3b8;">{icon("truck", size=13, color="#94a3b8")} {carrier}</span>
                     {risk_label}</div></div></div></div>"""
 
 

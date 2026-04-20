@@ -5,17 +5,21 @@ import streamlit as st
 from couchbase.cluster import Cluster
 import couchbase_client as cb
 import charts
-from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scenario_friendly_name
+from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scenario_friendly_name, icon
 
 
 def render(cluster: Cluster):
     # Homeowner view: query RAWDATA so they see their full name & address
     try:
-        deliveries = cb.get_raw_deliveries(cluster, limit=30)
+        deliveries = cb.get_raw_deliveries(cluster, limit=100)
     except Exception:
         st.warning("Delivery data is still loading. Please wait a moment and refresh.")
         return
-    critical_deliveries = [d for d in deliveries if d.get("risk_score", 0) >= 0.75]
+
+    # Build diverse subsets — variety of scenarios so the demo looks realistic
+    alert_pool = [d for d in deliveries if d.get("risk_score", 0) >= 0.45]
+    alert_deliveries = _diverse_pick(alert_pool, total=5)
+    recent_deliveries = _diverse_pick(deliveries, total=6)
 
     # ── Section 1: myQ Device Card ──────────────────────────────
     latest = deliveries[0] if deliveries else None
@@ -23,7 +27,7 @@ def render(cluster: Cluster):
     if latest and latest.get("scenario_type") == "door_stuck_open":
         door_closed = False
     door_status = "Closed" if door_closed else "Stuck Open"
-    door_icon = "🔒" if door_closed else "⚠️"
+    door_icon = icon("lock", size=24, color="#22c55e") if door_closed else icon("alert-triangle", size=24, color="#f59e0b")
     dot_cls = "" if door_closed else "open"
 
     st.markdown(f"""<div class="myq-device-card">
@@ -39,7 +43,7 @@ def render(cluster: Cluster):
             <div class="myq-door-status-text">{door_status}</div>
         </div>
         <div class="myq-delivery-banner">
-            <div class="myq-delivery-banner-title">📦 Delivery Intelligence</div>
+            <div class="myq-delivery-banner-title">{icon("package", size=14, color="rgba(255,255,255,0.8)")} Delivery Intelligence</div>
             <div class="myq-delivery-banner-text">
                 {_latest_delivery_text(latest)}
             </div>
@@ -58,6 +62,153 @@ def render(cluster: Cluster):
 
     st.markdown(charts.create_notification_comparison_html(latest), unsafe_allow_html=True)
 
+    # ── Code Spotlight: How Couchbase Intelligence Works ──────────
+    with st.expander("View Couchbase Eventing Pipeline", expanded=False):
+        if latest:
+            doc_id = latest.get("doc_id", latest.get("id", ""))
+            carrier = latest.get("carrier", "Unknown")
+            scenario = latest.get("scenario_type", "")
+            owner = latest.get("owner_name", "")
+            address = latest.get("address", "")
+            risk = latest.get("risk_score", 0)
+            location = latest.get("delivery_location", "").replace("_", " ")
+            factors = latest.get("risk_factors", [])
+            timeline = latest.get("event_timeline", [])
+
+            # Fetch the processed (enriched) counterpart to show real intelligence
+            proc = cb.get_delivery_by_id(cluster, "processeddata", doc_id)
+            knowledge = proc.get("knowledge_summary", "") if proc else ""
+            proc_name = proc.get("owner_name", "") if proc else ""
+            risk_assessment = proc.get("risk_assessment", {}) if proc else {}
+
+            # Redacted name preview
+            parts = owner.split() if owner else []
+            redacted = proc_name if proc_name else (
+                " ".join(p[0].upper() + "***" for p in parts if p) if parts else "R*******"
+            )
+
+            # ── Step 1: Eventing (what fires first in the data flow) ──
+            st.markdown("#### Step 1: Couchbase Eventing (Server-Side, Automatic)")
+            st.markdown(
+                f"When this `{carrier}` delivery landed in `rawdata.deliveries`, "
+                f"the **DeliveryKnowledgePipeline** eventing function fired automatically "
+                f"on the server — no application code involved:")
+            st.code(f"""// Fires on every mutation in rawdata.deliveries
+function OnUpdate(doc, meta) {{
+    // 1. Redact PII (owner name only — address kept for ops)
+    var redactedName = redactName(doc.owner_name);
+    //    "{owner}" → "{redacted}"
+
+    // 2. Correlate sensor events into a knowledge narrative
+    var narrative = buildNarrative(doc, redactedName);
+    //    Walks through {len(timeline)} events: {', '.join(e.get('event_type','') for e in timeline[:4])}...
+    //    Builds: "Delivery {doc_id} ... Event sequence: 1. {timeline[0].get('summary','') if timeline else '...'} ..."
+
+    // 3. Assess risk from detected risk_factors
+    var riskAssessment = buildRiskAssessment(doc);
+    //    Input factors: [{', '.join(factors) if factors else 'none'}]
+    //    Output: {{ level: "{risk_assessment.get('level','')}", score: {risk}, recommendations: [...] }}
+
+    // 4. Write enriched doc to processeddata.deliveries
+    enriched.owner_name = redactedName;          // PII redacted
+    enriched.knowledge_summary = narrative;       // structured intelligence
+    enriched.risk_assessment = riskAssessment;    // actionable risk data
+    enriched.embedding_text = buildEmbeddingText(enriched);
+    dst[meta.id] = enriched;
+}}""", language="javascript")
+
+            # ── Step 2: What eventing produced ──
+            st.markdown("---")
+            st.markdown("#### Step 2: Eventing Output (knowledge_summary)")
+            st.markdown(
+                f"The `buildNarrative()` function correlated **{len(timeline)} raw sensor events** "
+                f"into this structured knowledge narrative stored in `processeddata.deliveries`:")
+
+            if timeline:
+                st.markdown("**Input: Raw sensor events**")
+                for i, evt in enumerate(timeline, 1):
+                    evt_type = evt.get("event_type", "")
+                    summary = evt.get("summary", "")
+                    evt_loc = evt.get("location", "")
+                    st.markdown(
+                        f'<div style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0;'
+                        f'border-bottom:1px solid rgba(100,116,139,0.1);">'
+                        f'<span style="color:#6366f1;font-weight:600;min-width:1.5rem;">{i}.</span>'
+                        f'<code style="font-size:0.75rem;color:#fbbf24;min-width:10rem;">{evt_type}</code>'
+                        f'<span style="font-size:0.82rem;color:#cbd5e1;">{summary}</span>'
+                        f'<span style="font-size:0.72rem;color:#64748b;margin-left:auto;">{evt_loc}</span>'
+                        f'</div>', unsafe_allow_html=True)
+
+            if factors:
+                st.markdown("")
+                st.markdown(f"**Risk factors detected:** `{'`, `'.join(factors)}`")
+
+            if knowledge:
+                st.markdown("")
+                st.markdown(
+                    f'<div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);'
+                    f'border-radius:8px;padding:0.75rem 1rem;margin:0.5rem 0;">'
+                    f'<div style="font-size:0.72rem;color:#818cf8;font-weight:600;margin-bottom:0.25rem;">'
+                    f'OUTPUT: knowledge_summary (stored in Couchbase)</div>'
+                    f'<div style="font-size:0.82rem;color:#cbd5e1;line-height:1.5;">{knowledge}</div>'
+                    f'</div>', unsafe_allow_html=True)
+
+            # ── Step 3: Query that powers the intelligence panel ──
+            st.markdown("---")
+            st.markdown("#### Step 3: Read Enriched Data (Sub-Millisecond)")
+            st.markdown(
+                "The app reads the enriched document from `processeddata.deliveries` using a "
+                "KV GET and transforms the structured data into the user-friendly alert:")
+            st.markdown(f"""<div class="query-box">-- KV GET: instant point lookup by document ID
+GET `smartdelivery`.`processeddata`.`deliveries`.`{doc_id}`
+
+-- Returns enriched fields written by Eventing:
+--   knowledge_summary: "{knowledge[:100]}{"..." if len(knowledge) > 100 else ""}"
+--   owner_name: "{redacted}" (PII redacted)
+--   risk_assessment: {{ level: "{risk_assessment.get('level','')}", score: {risk} }}
+--   scenario_type: "{scenario}"
+--   carrier: "{carrier}"
+--   is_ai_ready: true (embedding generated)
+-- Latency: &lt;1ms (KV SDK direct lookup)</div>""", unsafe_allow_html=True)
+
+            st.markdown("")
+            smart_msg = _smart_summary(latest)
+            st.markdown(
+                f'<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);'
+                f'border-radius:8px;padding:0.75rem 1rem;margin:0.5rem 0;">'
+                f'<div style="font-size:0.72rem;color:#4ade80;font-weight:600;margin-bottom:0.25rem;">'
+                f'SMART DELIVERY ALERT (displayed to homeowner)</div>'
+                f'<div style="font-size:0.88rem;color:#e2e8f0;line-height:1.5;">{smart_msg}</div>'
+                f'</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown("#### Eventing Pipeline Flow")
+        st.markdown("""
+        ```
+        1. RAW DELIVERY MUTATION
+           rawdata.deliveries ← Go Event Generator (5,000 ops/sec)
+                    │
+                    ▼
+        2. DeliveryKnowledgePipeline (Eventing Function #1)
+           • PII redaction: owner_name → masked
+           • Narrative generation from event_timeline
+           • Risk assessment from risk_factors
+           • Write → processeddata.deliveries
+                    │
+                    ▼
+        3. VectorEmbeddingPipeline (Eventing Function #2)
+           • Builds embedding_text from narrative + metadata
+           • Calls OpenAI text-embedding-3-small → 1,536-dim vector
+           • Marks document as AI-ready
+                    │
+                    ▼
+        4. INTELLIGENCE READY
+           • Smart notifications (this screen)
+           • Vector Search & AI Copilot (RAG)
+           • All automated — zero application code
+        ```
+        """)
+
     st.markdown(
         '<div style="text-align:center;font-size:0.72rem;color:#475569;margin-bottom:1.5rem;">'
         'The smart insight on the right is generated <b style="color:#4ade80;">automatically</b> '
@@ -65,10 +216,10 @@ def render(cluster: Cluster):
         unsafe_allow_html=True)
 
     # ── Section 3: Active Alerts ────────────────────────────────
-    if critical_deliveries:
-        st.markdown('<div class="section-title">&#128680; Active Alerts</div>',
+    if alert_deliveries:
+        st.markdown(f'<div class="section-title">{icon("shield-alert", size=18, color="#ef4444")} Active Alerts</div>',
                     unsafe_allow_html=True)
-        for d in critical_deliveries[:5]:
+        for d in alert_deliveries:
             scenario = scenario_friendly_name(d.get("scenario_type", ""))
             s_icon = scenario_icon(d.get("scenario_type", ""))
             # Raw data may not have risk_assessment; generate recommendation from risk_factors
@@ -93,7 +244,7 @@ def render(cluster: Cluster):
             </div>""", unsafe_allow_html=True)
 
     # ── Section 4: Recent Delivery Activity ─────────────────────
-    st.markdown('<div class="section-title">&#128230; Recent Delivery Activity</div>',
+    st.markdown(f'<div class="section-title">{icon("package", size=18, color="#818cf8")} Recent Delivery Activity</div>',
                 unsafe_allow_html=True)
     st.markdown(
         '<div class="section-subtitle">Smart notifications powered by AI-generated delivery narratives. '
@@ -104,7 +255,7 @@ def render(cluster: Cluster):
         st.info("No deliveries found. Make sure the event generator has produced data.")
         return
 
-    for d in deliveries[:15]:
+    for d in recent_deliveries:
         _render_notification_card(d)
 
 
@@ -174,15 +325,15 @@ def _render_notification_card(d: dict):
     if risk_score >= 0.75:
         card_cls = "notification-card-critical"
         risk_label = f'<span style="color:#f87171;font-weight:600;">{risk_score:.0%} CRITICAL</span>'
-        header_icon = "&#128680;"
+        header_icon = icon("shield-alert", size=18, color="#f87171")
     elif risk_score >= 0.45:
         card_cls = "notification-card-risk"
         risk_label = f'<span style="color:#fbbf24;font-weight:600;">{risk_score:.0%} RISK</span>'
-        header_icon = "&#9888;&#65039;"
+        header_icon = icon("alert-triangle", size=18, color="#fbbf24")
     else:
         card_cls = "notification-card-safe"
         risk_label = f'<span style="color:#4ade80;">{risk_score:.0%} Safe</span>'
-        header_icon = "&#9989;"
+        header_icon = icon("check-circle", size=18, color="#4ade80")
 
     created = d.get("created_at", "")
     time_str = created[11:16] if len(created) >= 16 else created
@@ -202,9 +353,9 @@ def _render_notification_card(d: dict):
         <div class="notif-body">{summary}</div>
         <div class="notif-tags">
             <span class="notif-tag">{s_icon} {scenario}</span>
-            <span class="notif-tag">&#127968; {d.get('delivery_location','').replace('_',' ').title()}</span>
-            <span class="notif-tag">&#128666; {d.get('carrier','')}</span>
-            <span class="notif-tag">&#9889; {risk_label} {risk_bar_html(risk_score)}</span>
+            <span class="notif-tag">{icon("home", size=13, color="#94a3b8")} {d.get('delivery_location','').replace('_',' ').title()}</span>
+            <span class="notif-tag">{icon("truck", size=13, color="#94a3b8")} {d.get('carrier','')}</span>
+            <span class="notif-tag">{icon("zap", size=13, color="#94a3b8")} {risk_label} {risk_bar_html(risk_score)}</span>
         </div>
     </div>""", unsafe_allow_html=True)
 
@@ -230,3 +381,50 @@ def _recommendations_from_factors(factors: list) -> list:
         if f in _FACTOR_RECS and _FACTOR_RECS[f] not in recs:
             recs.append(_FACTOR_RECS[f])
     return recs if recs else ["Check your security camera."]
+
+
+def _diverse_pick(items: list[dict], total: int = 6) -> list[dict]:
+    """Pick a diverse mix of deliveries that looks realistic in a demo.
+
+    Pass 1: grab the first occurrence of each unique scenario_type.
+    Pass 2: if we still haven't reached *total*, backfill with remaining
+             items (different addresses) so the feed never looks sparse.
+    """
+    if not items:
+        return []
+
+    picked_ids: set[str] = set()
+    result: list[dict] = []
+
+    # Pass 1 — one per scenario (diversity)
+    seen_scenarios: set[str] = set()
+    for d in items:
+        s = d.get("scenario_type", "")
+        if s not in seen_scenarios:
+            result.append(d)
+            picked_ids.add(id(d))
+            seen_scenarios.add(s)
+        if len(result) >= total:
+            return result
+
+    # Pass 2 — backfill with remaining items (prefer different addresses)
+    seen_addresses: set[str] = {d.get("address", "") for d in result}
+    for d in items:
+        if id(d) in picked_ids:
+            continue
+        addr = d.get("address", "")
+        if addr not in seen_addresses:
+            result.append(d)
+            picked_ids.add(id(d))
+            seen_addresses.add(addr)
+            if len(result) >= total:
+                return result
+
+    # Pass 3 — still short, just fill with whatever is left
+    for d in items:
+        if id(d) not in picked_ids:
+            result.append(d)
+            if len(result) >= total:
+                break
+
+    return result
