@@ -177,4 +177,3 @@ SmartDelivery/
 - [Couchbase Go SDK](https://docs.couchbase.com/go-sdk/current/hello-world/overview.html) -- High-throughput bulk operations
 - [Streamlit](https://streamlit.io) -- Python dashboard framework
 - [OpenAI](https://openai.com) -- Embeddings + chat completions for RAG
-- [Plotly](https://plotly.com) -- Interactive charts

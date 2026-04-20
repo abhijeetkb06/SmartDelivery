@@ -1,4 +1,4 @@
-"""Tab 3 - Vector Search & AI Copilot: Mirrors reference repo intelligent_search.py pattern."""
+"""Tab 3 - Vector Search & AI Copilot: semantic delivery search and RAG-powered Q&A."""
 
 from __future__ import annotations
 import streamlit as st
@@ -17,7 +17,7 @@ def render_search(cluster):
     st.markdown("### Semantic Delivery Search")
     st.markdown("Search deliveries by meaning using Couchbase Vector Search with APPROX_VECTOR_DISTANCE.")
 
-    # Search input + button (5:1 columns, matching reference repo)
+    # Search input + button
     search_col, btn_col = st.columns([5, 1])
     with search_col:
         query = st.text_input("Search Query",
@@ -26,7 +26,7 @@ def render_search(cluster):
     with btn_col:
         search_clicked = st.button("Search", type="primary", use_container_width=True, key="search_btn")
 
-    # Filters row (matching reference repo's 5-column filter layout)
+    # Filters row
     f1, f2, f3, f4, f5 = st.columns(5)
     with f1:
         st.markdown('<div class="filter-label">Carrier</div>', unsafe_allow_html=True)
@@ -97,7 +97,7 @@ def render_search(cluster):
             badge_list.append((risk_level, "outline"))
         ui.badges(badge_list=badge_list, class_name="flex gap-2", key="result_badges")
 
-        # Query expander (green query box, matching reference repo)
+        # Query expander
         if st.session_state.search_query_display:
             with st.expander("View Couchbase Query", expanded=False):
                 st.markdown(f'<div class="query-box">{st.session_state.search_query_display}</div>',
@@ -137,7 +137,7 @@ def render_search(cluster):
                 - **Single Query**: Combines filtering + similarity in one call
                 """)
 
-        # Result cards (matching reference repo pattern)
+        # Result cards
         st.markdown("")
         for i, r in enumerate(results, 1):
             score = abs(r.get("score", r.get("similarity", 0)))
@@ -195,7 +195,7 @@ def render_search(cluster):
 
 # ── AI Copilot Tab ──────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are the myQ SmartDelivery AI assistant for Chamberlain operations.
+SYSTEM_PROMPT = """You are the myQ SmartDelivery AI assistant for operations teams.
 You help operations teams understand package delivery events, garage activity, and security risks.
 
 You have access to real-time data from Couchbase about deliveries, events, and alerts.
@@ -233,7 +233,7 @@ def render_copilot(cluster):
         _process_question(cluster, question)
         st.rerun()
 
-    # Chat input + Ask button (5:1 columns, matching reference repo)
+    # Chat input + Ask button
     col1, col2 = st.columns([5, 1])
     with col1:
         user_input = st.text_input("Ask a question",
@@ -406,6 +406,18 @@ def render(cluster: Cluster):
         '<div class="section-subtitle">Search deliveries by semantic meaning and ask natural language questions &mdash; '
         'powered by Couchbase Vector Search + RAG.</div>',
         unsafe_allow_html=True)
+
+    # Auto-detect and create vector index when ready (fallback if watcher hasn't run yet)
+    vector_ready, vector_msg = cb.ensure_vector_index(cluster)
+
+    if not vector_ready:
+        st.warning(vector_msg)
+        st.markdown(
+            '<div style="font-size:0.78rem;color:#64748b;margin-top:0.5rem;">'
+            'The vector index is created automatically after starting the Event Stream. '
+            'Navigate to Command Center and click <b>Start Event Stream</b> to begin.</div>',
+            unsafe_allow_html=True)
+        return
 
     selected = ui.tabs(
         options=["Delivery Search", "AI Copilot"],

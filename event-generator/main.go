@@ -50,6 +50,15 @@ func main() {
 	fmt.Println("      Connected!")
 
 	if *continuous {
+		// Write 200 homes to Couchbase so the dashboard shows "Homes Monitored"
+		homes := generator.GenerateHomes(200)
+		homeDocs := make(map[string]interface{}, len(homes))
+		for _, h := range homes {
+			homeDocs[h.ID] = h
+		}
+		client.BulkUpsert("homes", homeDocs)
+		fmt.Printf("Wrote %d homes\n", len(homes))
+
 		runContinuousFast(client, *rate, *duration, *workers, *batchSize)
 		return
 	}

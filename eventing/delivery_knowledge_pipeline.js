@@ -3,10 +3,10 @@
  * ─────────────────────────
  * Couchbase Eventing Function #1
  *
- * Source:   chamberlain.rawdata.deliveries
+ * Source:   smartdelivery.rawdata.deliveries
  * Bindings:
- *   - Bucket alias "dst"  → chamberlain.processeddata.deliveries (read+write)
- *   - Bucket alias "src_events" → chamberlain.rawdata.events (read)
+ *   - Bucket alias "dst"  → smartdelivery.processeddata.deliveries (read+write)
+ *   - Bucket alias "src_events" → smartdelivery.rawdata.events (read)
  *
  * Trigger: fires on every mutation in rawdata.deliveries
  * Action:  enriches raw delivery with a knowledge narrative,

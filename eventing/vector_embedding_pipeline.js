@@ -3,9 +3,9 @@
  * ───────────────────────
  * Couchbase Eventing Function #2
  *
- * Source:   chamberlain.processeddata.deliveries
+ * Source:   smartdelivery.processeddata.deliveries
  * Bindings:
- *   - Bucket alias "dst"     → chamberlain.processeddata.deliveries (read+write)
+ *   - Bucket alias "dst"     → smartdelivery.processeddata.deliveries (read+write)
  *   - URL    alias "openai"  → https://api.openai.com  (auth: Bearer <OPENAI_API_KEY>)
  *
  * Trigger: fires on every mutation in processeddata.deliveries

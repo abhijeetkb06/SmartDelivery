@@ -2,24 +2,157 @@
 
 from __future__ import annotations
 from datetime import timedelta
+import logging
+import os
+from pathlib import Path
+import signal
+import subprocess
+import threading
+import time
+
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
+from couchbase.auth import PasswordAuthenticator
 from couchbase.cluster import Cluster
+from couchbase.options import ClusterOptions, ClusterTimeoutOptions
+from couchbase.exceptions import CouchbaseException
+
 import couchbase_client as cb
-import charts
-from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scenario_friendly_name
+from config import CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_PROCESSED
 
 _SEVERITY_COLORS = {"critical": "#ef4444", "high": "#f97316", "medium": "#fbbf24", "low": "#6366f1"}
+_GEN_BIN = Path(__file__).resolve().parent.parent / "event-generator" / "smart-delivery-gen"
+_log = logging.getLogger(__name__)
+
+# ── Background Vector Index Watcher ─────────────────────────────
+_vector_watcher_running = False  # module-level flag to prevent duplicate threads
+
+
+def _vector_index_watcher():
+    """Background thread: waits for embeddings, then creates the vector index.
+
+    Flow:
+      1. Sleep 30s (let eventing pipeline start processing)
+      2. Poll AI-ready doc count every 15s
+      3. Once >= 200, create IVF,SQ8 vector index
+      4. Exit
+    """
+    global _vector_watcher_running
+    try:
+        _log.info("[VectorWatcher] Waiting 30s for eventing pipeline to generate embeddings...")
+        time.sleep(30)
+
+        # Create an independent cluster connection for this thread
+        auth = PasswordAuthenticator(CB_USERNAME, CB_PASSWORD)
+        cluster = Cluster(
+            CB_CONN_STR,
+            ClusterOptions(auth, timeout_options=ClusterTimeoutOptions(
+                query_timeout=timedelta(seconds=120),
+            )),
+        )
+        cluster.wait_until_ready(timedelta(seconds=15))
+
+        # Poll until we have enough embeddings (max ~10 minutes)
+        threshold = cb.VECTOR_INDEX_THRESHOLD
+        for attempt in range(40):  # 40 * 15s = 10 min max
+            # Check if index already exists and is online
+            try:
+                rows = list(cluster.query(
+                    "SELECT state FROM system:indexes WHERE name = 'idx_delivery_embedding'"
+                ))
+                if rows and rows[0].get("state") == "online":
+                    _log.info("[VectorWatcher] Vector index already online. Exiting.")
+                    return
+            except CouchbaseException:
+                pass
+
+            # Check AI-ready count
+            try:
+                rows = list(cluster.query(
+                    f"SELECT COUNT(*) AS cnt FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d "
+                    f"WHERE d.is_ai_ready = true"
+                ))
+                ai_ready = rows[0]["cnt"] if rows else 0
+            except CouchbaseException:
+                ai_ready = 0
+
+            _log.info("[VectorWatcher] AI-ready docs: %d/%d", ai_ready, threshold)
+
+            if ai_ready >= threshold:
+                # Drop broken index if exists
+                try:
+                    list(cluster.query(
+                        f"DROP INDEX `idx_delivery_embedding` ON "
+                        f"`{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`"
+                    ))
+                    time.sleep(3)
+                except CouchbaseException:
+                    pass
+
+                # Create the vector index
+                try:
+                    list(cluster.query(f"""
+                        CREATE VECTOR INDEX `idx_delivery_embedding`
+                        ON `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`(embedding VECTOR)
+                        WITH {{"dimension": 1536, "similarity": "COSINE", "description": "IVF,SQ8"}}
+                    """))
+                    _log.info("[VectorWatcher] Vector index created! Will build in background.")
+                except CouchbaseException as e:
+                    if "already exists" not in str(e).lower():
+                        _log.warning("[VectorWatcher] Index creation failed: %s", e)
+                return
+
+            time.sleep(15)
+
+        _log.warning("[VectorWatcher] Timed out waiting for enough embeddings.")
+    finally:
+        _vector_watcher_running = False
+
+
+def _start_vector_index_watcher():
+    """Spawn the vector index watcher thread if not already running."""
+    global _vector_watcher_running
+    if _vector_watcher_running:
+        return
+    _vector_watcher_running = True
+    t = threading.Thread(target=_vector_index_watcher, daemon=True, name="VectorIndexWatcher")
+    t.start()
+    _log.info("[VectorWatcher] Background thread started.")
+
+
+def _start_generator(cluster: Cluster):
+    """Launch Go event generator as a background process."""
+    proc = subprocess.Popen(
+        [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    st.session_state["gen_pid"] = proc.pid
+    # Kick off background vector index creation (waits 30s, then auto-creates when ready)
+    _start_vector_index_watcher()
+
+
+def _stop_generator(cluster: Cluster):
+    """Kill the generator process by PID and clear the running flag in Couchbase."""
+    pid = st.session_state.get("gen_pid")
+    if pid:
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    st.session_state.pop("gen_pid", None)
+    # Clear the running flag in Couchbase so the UI stops treating it as live
+    try:
+        col = cluster.bucket("smartdelivery").scope("rawdata").collection("events")
+        col.upsert("pipeline_metrics", {"running": False})
+    except Exception:
+        pass
 
 
 def render(cluster: Cluster):
     # ── Check if generator is running for auto-refresh ──────────
     metrics = cb.get_pipeline_metrics(cluster)
     is_live = metrics is not None and metrics.get("running", False)
-
-    # Auto-refresh every 3 seconds when generator is running
-    if is_live:
-        st_autorefresh(interval=3000, key="ops_autorefresh")
 
     # ── Section 1: Fleet Overview Stats ─────────────────────────
     # When generator is running, use its live metrics (fast) instead of slow COUNT(*) queries
@@ -38,6 +171,35 @@ def render(cluster: Cluster):
 
     st.markdown('<div class="section-title">myQ Command Center</div>', unsafe_allow_html=True)
 
+    # ── Generator Start / Stop control ───────────────────────────
+    ctrl_col, status_col = st.columns([1, 3])
+    with ctrl_col:
+        if is_live:
+            if st.button("Stop Event Stream", type="secondary", use_container_width=True):
+                _stop_generator(cluster)
+                st.session_state.pop("gen_starting", None)
+                st.rerun()
+        else:
+            if st.button("Start Event Stream", type="primary", use_container_width=True):
+                _start_generator(cluster)
+                # Flag so auto-refresh kicks in before first metrics doc arrives
+                st.session_state["gen_starting"] = True
+                st.rerun()
+    with status_col:
+        if is_live:
+            rate = metrics.get("actual_rate", 0)
+            pid = st.session_state.get("gen_pid", "?")
+            st.markdown(
+                f'<div style="padding:0.5rem 0;font-size:0.82rem;color:#4ade80;">'
+                f'&#9679; LIVE &mdash; Streaming at {rate:,.0f} ops/sec '
+                f'(PID {pid})</div>',
+                unsafe_allow_html=True)
+        else:
+            st.markdown(
+                '<div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;">'
+                'Click <b>Start Event Stream</b> to begin ingesting delivery events at 5,000/sec.</div>',
+                unsafe_allow_html=True)
+
     # Show LIVE indicator when generator is running
     if is_live:
         st.markdown(
@@ -48,7 +210,7 @@ def render(cluster: Cluster):
     else:
         st.markdown(
             '<div class="section-subtitle">Fleet-wide delivery intelligence across all '
-            'Chamberlain-equipped homes. Homeowner names are automatically redacted by Couchbase Eventing.</div>',
+            'myQ-equipped homes. Homeowner names are automatically redacted by Couchbase Eventing.</div>',
             unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -264,31 +426,7 @@ def render(cluster: Cluster):
             'Addresses are preserved so the ops team can <b>act</b> on incidents.</div>',
             unsafe_allow_html=True)
 
-    # ── Section 4: Fleet Charts ─────────────────────────────────
-    ch1, ch2, ch3 = st.columns(3)
-    with ch1:
-        st.markdown('<div style="font-size:0.82rem;font-weight:600;color:#94a3b8;text-align:center;'
-                    'margin-bottom:0.3rem;">Delivery Scenarios</div>', unsafe_allow_html=True)
-        scenario_data = cb.get_scenario_distribution(cluster, "rawdata")
-        if scenario_data:
-            fig = charts.create_scenario_donut(scenario_data)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    with ch2:
-        st.markdown('<div style="font-size:0.82rem;font-weight:600;color:#94a3b8;text-align:center;'
-                    'margin-bottom:0.3rem;">Delivery Outcomes</div>', unsafe_allow_html=True)
-        stats = cb.get_delivery_stats(cluster, "rawdata")
-        if stats:
-            fig = charts.create_status_bar(stats)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-    with ch3:
-        st.markdown('<div style="font-size:0.82rem;font-weight:600;color:#94a3b8;text-align:center;'
-                    'margin-bottom:0.3rem;">Carrier Breakdown</div>', unsafe_allow_html=True)
-        carrier_data = cb.get_carrier_distribution(cluster, "rawdata")
-        if carrier_data:
-            fig = charts.create_carrier_pie(carrier_data)
-            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
-
-    # ── Section 5: Alert Feed ───────────────────────────────────
+    # ── Section 4: Alert Feed ───────────────────────────────────
     st.markdown('<div class="section-title">&#128680; Alert Feed</div>', unsafe_allow_html=True)
     fc1, fc2 = st.columns(2)
     with fc1:
@@ -303,27 +441,6 @@ def render(cluster: Cluster):
             _render_alert_card(alert)
     else:
         st.info("No alerts found matching the filter.")
-
-    # ── Section 6: Delivery Grid ────────────────────────────────
-    st.markdown('<div class="section-title">&#128230; Recent Deliveries (PII-Safe)</div>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        status_filter = st.selectbox("Status", ["All", "completed_success", "completed_risk", "failed", "suspicious"])
-    with c2:
-        scenario_filter = st.selectbox("Scenario", ["All", "happy_path", "front_door_misdelivery",
-                                                      "package_behind_car", "door_stuck_open",
-                                                      "no_package_placed", "delivery_timeout", "theft_suspicious"])
-    with c3:
-        risk_filter = st.selectbox("Risk Level", ["All", "critical", "high", "medium", "low"])
-    results = cb.search_deliveries(cluster,
-        status="" if status_filter == "All" else status_filter,
-        scenario="" if scenario_filter == "All" else scenario_filter,
-        risk_level="" if risk_filter == "All" else risk_filter, limit=15)
-    if results:
-        for row in results:
-            _render_delivery_row(row)
-    else:
-        st.info("No deliveries match the selected filters.")
 
 
 def _render_alert_card(alert: dict):
@@ -345,22 +462,3 @@ def _render_alert_card(alert: dict):
             <div style="color:#94a3b8;font-size:0.78rem;margin-top:0.15rem;">
                 {address} &mdash; {message[:80]}{"..." if len(message) > 80 else ""}</div>
         </div></div>""", unsafe_allow_html=True)
-
-
-def _render_delivery_row(row: dict):
-    scenario = scenario_friendly_name(row.get("scenario_type", ""))
-    s_icon = scenario_icon(row.get("scenario_type", ""))
-    risk_score = row.get("risk_score", 0)
-    # Name comes from processeddata (redacted), address is intact
-    st.markdown(f"""<div class="glass-card" style="padding:0.8rem 1rem;">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-            <div><span style="font-weight:600;color:#e2e8f0;">{row.get('id','')}</span>
-            {status_badge(row.get('status',''))}</div>
-            <div style="display:flex;align-items:center;gap:0.8rem;font-size:0.82rem;color:#94a3b8;">
-                <span>{s_icon} {scenario}</span>
-                <span>&#128666; {row.get('carrier','')}</span>
-                <span>&#9889; {risk_score:.0%} {risk_bar_html(risk_score)}</span>
-            </div></div>
-        <div style="font-size:0.78rem;color:#64748b;margin-top:0.25rem;">
-            {row.get('owner_name','')} &mdash; {row.get('address','')}</div>
-    </div>""", unsafe_allow_html=True)

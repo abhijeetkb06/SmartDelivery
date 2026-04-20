@@ -1,5 +1,5 @@
 # Couchbase Eventing Deployment Guide
-## SmartDelivery - Chamberlain Demo
+## SmartDelivery - Eventing Pipeline
 
 ### Prerequisites
 - Data loaded via Go event generator into `rawdata.*` collections
@@ -20,19 +20,19 @@ knowledge narrative and risk assessment, then writes it to `processeddata.delive
 2. Click **Add Function**
 3. Settings:
    - **Name**: `DeliveryKnowledgePipeline`
-   - **Source Bucket**: `chamberlain`
+   - **Source Bucket**: `smartdelivery`
    - **Source Scope**: `rawdata`
    - **Source Collection**: `deliveries`
    - **Eventing Storage** (metadata):
-     - Bucket: `chamberlain`
+     - Bucket: `smartdelivery`
      - Scope: `_default`
      - Collection: `_default`
 
 4. **Bindings** — Add the following:
    | Type   | Alias        | Bucket        | Scope           | Collection  | Access     |
    |--------|-------------|---------------|-----------------|-------------|------------|
-   | Bucket | `dst`       | `chamberlain` | `processeddata` | `deliveries`| Read+Write |
-   | Bucket | `src_events`| `chamberlain` | `rawdata`       | `events`    | Read       |
+   | Bucket | `dst`       | `smartdelivery` | `processeddata` | `deliveries`| Read+Write |
+   | Bucket | `src_events`| `smartdelivery` | `rawdata`       | `events`    | Read       |
 
 5. Paste the code from `eventing/delivery_knowledge_pipeline.js`
 6. Click **Save**
@@ -54,18 +54,18 @@ generate a 1536-dimension embedding vector and marks the document as AI-ready.
 2. Click **Add Function**
 3. Settings:
    - **Name**: `VectorEmbeddingPipeline`
-   - **Source Bucket**: `chamberlain`
+   - **Source Bucket**: `smartdelivery`
    - **Source Scope**: `processeddata`
    - **Source Collection**: `deliveries`
    - **Eventing Storage** (metadata):
-     - Bucket: `chamberlain`
+     - Bucket: `smartdelivery`
      - Scope: `_default`
      - Collection: `_default`
 
 4. **Bindings** — Add the following:
    | Type   | Alias    | Details                                                    |
    |--------|----------|------------------------------------------------------------|
-   | Bucket | `dst`    | Bucket: `chamberlain`, Scope: `processeddata`, Collection: `deliveries`, Access: Read+Write |
+   | Bucket | `dst`    | Bucket: `smartdelivery`, Scope: `processeddata`, Collection: `deliveries`, Access: Read+Write |
    | URL    | `openai` | URL: `https://api.openai.com`, Auth: **Bearer Token**, Token: `<your OPENAI_API_KEY>` |
 
 5. Paste the code from `eventing/vector_embedding_pipeline.js`
@@ -109,7 +109,7 @@ Once all 50 deliveries are processed and have embeddings, create the vector inde
 
 ```sql
 CREATE INDEX idx_delivery_embedding
-ON chamberlain.processeddata.deliveries(embedding VECTOR)
+ON smartdelivery.processeddata.deliveries(embedding VECTOR)
 WITH {"dimension": 1536, "similarity": "DOT", "description": "IVF,SQ8"};
 ```
 

@@ -10,7 +10,11 @@ from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scena
 
 def render(cluster: Cluster):
     # Homeowner view: query RAWDATA so they see their full name & address
-    deliveries = cb.get_raw_deliveries(cluster, limit=30)
+    try:
+        deliveries = cb.get_raw_deliveries(cluster, limit=30)
+    except Exception:
+        st.warning("Delivery data is still loading. Please wait a moment and refresh.")
+        return
     critical_deliveries = [d for d in deliveries if d.get("risk_score", 0) >= 0.75]
 
     # ── Section 1: myQ Device Card ──────────────────────────────
@@ -107,21 +111,56 @@ def render(cluster: Cluster):
 def _latest_delivery_text(latest: dict | None) -> str:
     if not latest:
         return "No recent delivery activity."
-    scenario = scenario_friendly_name(latest.get("scenario_type", ""))
     carrier = latest.get("carrier", "Unknown")
-    risk = latest.get("risk_score", 0)
-    if risk < 0.2:
-        risk_text = f"Low risk ({risk:.0%})"
-    elif risk < 0.45:
-        risk_text = f"Moderate risk ({risk:.0%})"
-    elif risk < 0.75:
-        risk_text = f"High risk ({risk:.0%})"
-    else:
-        risk_text = f"CRITICAL risk ({risk:.0%})"
-    # Homeowner sees full name and address — it's their own data
-    owner = latest.get("owner_name", "")
     address = latest.get("address", "")
-    return f"Latest: {carrier} delivery for {owner} at {address} &mdash; {scenario}. {risk_text}."
+    return f"Latest: {carrier} delivery at {address} &mdash; {_smart_summary(latest)}"
+
+
+def _smart_summary(d: dict) -> str:
+    """Generate a scenario-aware insight from delivery data."""
+    carrier = d.get("carrier", "Carrier")
+    scenario = d.get("scenario_type", "")
+    location = d.get("delivery_location", "").replace("_", " ")
+    risk = d.get("risk_score", 0)
+    factors = d.get("risk_factors", [])
+
+    if scenario == "happy_path":
+        return (
+            f"{carrier} package safely delivered inside your garage. "
+            f"Door confirmed closed and secured — no action needed."
+        )
+    if scenario == "front_door_misdelivery":
+        return (
+            f"{carrier} left your package at the front door instead of the garage — "
+            f"exposed to weather and theft. Retrieve it soon."
+        )
+    if scenario == "package_behind_car":
+        return (
+            f"{carrier} placed your package behind your car in the garage — "
+            f"it could be crushed when you back out. Move it before driving."
+        )
+    if scenario == "door_stuck_open":
+        return (
+            f"Garage door stuck open after {carrier} delivery — "
+            f"package is inside but garage is unsecured. Immediate action required."
+        )
+    if scenario == "no_package_placed":
+        return (
+            f"Garage door opened for {carrier} but no package detected inside — "
+            f"possible missed delivery or wrong drop-off."
+        )
+    if scenario == "delivery_timeout":
+        return (
+            f"Expected {carrier} delivery never arrived — "
+            f"delivery window expired with no carrier activity."
+        )
+    if scenario == "theft_suspicious":
+        return (
+            f"Unknown person detected near your {carrier} package at the front door "
+            f"shortly after delivery. Check your camera immediately."
+        )
+    # Fallback
+    return f"{carrier} delivery at {location}. Risk: {risk:.0%}."
 
 
 def _render_notification_card(d: dict):
@@ -148,11 +187,8 @@ def _render_notification_card(d: dict):
     created = d.get("created_at", "")
     time_str = created[11:16] if len(created) >= 16 else created
 
-    # Build a homeowner-friendly summary
-    carrier = d.get("carrier", "Unknown")
-    location = d.get("delivery_location", "").replace("_", " ").title()
-    status = d.get("status", "").replace("_", " ").title()
-    summary = f"{carrier} delivery to {owner_name} at {address}. Package at {location}. Status: {status}."
+    # Build a homeowner-friendly smart insight
+    summary = _smart_summary(d)
 
     st.markdown(f"""<div class="notification-card {card_cls}">
         <div class="notif-header">
@@ -166,8 +202,8 @@ def _render_notification_card(d: dict):
         <div class="notif-body">{summary}</div>
         <div class="notif-tags">
             <span class="notif-tag">{s_icon} {scenario}</span>
-            <span class="notif-tag">&#127968; {location}</span>
-            <span class="notif-tag">&#128666; {carrier}</span>
+            <span class="notif-tag">&#127968; {d.get('delivery_location','').replace('_',' ').title()}</span>
+            <span class="notif-tag">&#128666; {d.get('carrier','')}</span>
             <span class="notif-tag">&#9889; {risk_label} {risk_bar_html(risk_score)}</span>
         </div>
     </div>""", unsafe_allow_html=True)

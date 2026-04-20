@@ -1,94 +1,7 @@
-"""Plotly chart builders for SmartDelivery (dark theme)."""
+"""HTML UI builders for SmartDelivery delivery comparisons."""
 
 from __future__ import annotations
-import plotly.graph_objects as go
 
-_FONT = dict(family="Inter, sans-serif", color="#94a3b8")
-_TRANSPARENT = "rgba(0,0,0,0)"
-
-def _base_layout(**overrides) -> dict:
-    defaults = dict(
-        paper_bgcolor=_TRANSPARENT, plot_bgcolor=_TRANSPARENT,
-        font=_FONT, margin=dict(l=20, r=20, t=30, b=20),
-    )
-    defaults.update(overrides)
-    return defaults
-
-_SCENARIO_COLORS = {
-    "happy_path": "#22c55e", "front_door_misdelivery": "#fbbf24",
-    "package_behind_car": "#f97316", "door_stuck_open": "#ef4444",
-    "no_package_placed": "#a855f7", "delivery_timeout": "#6366f1",
-    "theft_suspicious": "#dc2626",
-}
-_SCENARIO_NAMES = {
-    "happy_path": "Happy Path", "front_door_misdelivery": "Front Door Misdelivery",
-    "package_behind_car": "Package Behind Car", "door_stuck_open": "Door Stuck Open",
-    "no_package_placed": "Missing Package", "delivery_timeout": "Delivery Timeout",
-    "theft_suspicious": "Suspicious Activity",
-}
-
-def create_scenario_donut(scenario_data: list[dict]) -> go.Figure:
-    labels = [_SCENARIO_NAMES.get(r["scenario_type"], r["scenario_type"]) for r in scenario_data]
-    values = [r["cnt"] for r in scenario_data]
-    colors = [_SCENARIO_COLORS.get(r["scenario_type"], "#64748b") for r in scenario_data]
-    total = sum(values)
-    fig = go.Figure(go.Pie(labels=labels, values=values, hole=0.5,
-        marker=dict(colors=colors, line=dict(color="#0f172a", width=2)),
-        textinfo="percent", textfont=dict(size=11, color="#e2e8f0"),
-        hovertemplate="<b>%{label}</b><br>%{value} deliveries (%{percent})<extra></extra>"))
-    fig.add_annotation(text=f"<b>{total}</b><br><span style='font-size:11px;color:#94a3b8'>Total</span>",
-                       showarrow=False, font=dict(size=20, color="#e2e8f0"))
-    fig.update_layout(**_base_layout(height=300, showlegend=True,
-        legend=dict(font=dict(size=10, color="#94a3b8"), bgcolor=_TRANSPARENT, x=1, y=0.5)))
-    return fig
-
-_STATUS_META = [
-    ("success", "Successful", "#22c55e"),
-    ("risk", "Completed w/ Risk", "#fbbf24"),
-    ("failed", "Failed", "#ef4444"),
-    ("suspicious", "Suspicious", "#a855f7"),
-]
-
-def create_status_bar(stats: dict) -> go.Figure:
-    fig = go.Figure()
-    for key, label, color in _STATUS_META:
-        val = stats.get(key, 0)
-        fig.add_trace(go.Bar(y=[label], x=[val], orientation="h", name=label,
-            marker=dict(color=color, line=dict(color="#0f172a", width=1)),
-            text=[str(val)], textposition="auto",
-            textfont=dict(color="#e2e8f0", size=12),
-            hovertemplate=f"<b>{label}</b>: %{{x}}<extra></extra>"))
-    fig.update_layout(**_base_layout(height=250, showlegend=False, barmode="stack",
-        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(showgrid=False, tickfont=dict(size=11, color="#94a3b8"))))
-    return fig
-
-def create_risk_gauge(risk_score: float) -> go.Figure:
-    pct = risk_score * 100
-    bar_color = "#ef4444" if risk_score >= 0.75 else "#fbbf24" if risk_score >= 0.45 else "#6366f1" if risk_score >= 0.20 else "#22c55e"
-    fig = go.Figure(go.Indicator(mode="gauge+number", value=pct,
-        number=dict(suffix="%", font=dict(size=28, color="#e2e8f0")),
-        gauge=dict(axis=dict(range=[0,100], tickwidth=1, tickcolor="#334155", tickfont=dict(size=10, color="#64748b")),
-            bar=dict(color=bar_color, thickness=0.7), bgcolor="rgba(15,23,42,0.5)",
-            borderwidth=1, bordercolor="rgba(99,102,241,0.2)",
-            steps=[dict(range=[0,20], color="rgba(34,197,94,0.15)"), dict(range=[20,45], color="rgba(99,102,241,0.10)"),
-                   dict(range=[45,75], color="rgba(251,191,36,0.15)"), dict(range=[75,100], color="rgba(239,68,68,0.15)")],
-        )))
-    fig.update_layout(**_base_layout(height=200, margin=dict(l=30, r=30, t=20, b=10)))
-    return fig
-
-_CARRIER_COLORS = {"UPS": "#7c4a1e", "FedEx": "#6366f1", "USPS": "#2563eb", "Amazon": "#f97316", "DHL": "#eab308"}
-
-def create_carrier_pie(carrier_data: list[dict]) -> go.Figure:
-    labels = [r["carrier"] for r in carrier_data]
-    values = [r["cnt"] for r in carrier_data]
-    colors = [_CARRIER_COLORS.get(r["carrier"], "#64748b") for r in carrier_data]
-    fig = go.Figure(go.Pie(labels=labels, values=values,
-        marker=dict(colors=colors, line=dict(color="#0f172a", width=2)),
-        textinfo="label+percent", textfont=dict(size=11, color="#e2e8f0"),
-        hovertemplate="<b>%{label}</b><br>%{value} deliveries (%{percent})<extra></extra>"))
-    fig.update_layout(**_base_layout(height=280, showlegend=False))
-    return fig
 
 def create_notification_comparison_html(delivery: dict | None = None) -> str:
     """Build before/after comparison using real delivery data.
@@ -132,17 +45,9 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
     status = delivery.get("status", "")
     knowledge = delivery.get("knowledge_summary", "")
 
-    # For raw data, knowledge_summary may not exist — build one
+    # For raw data, knowledge_summary may not exist — build a rich scenario-aware insight
     if not knowledge:
-        location = delivery.get("delivery_location", "garage").replace("_", " ")
-        if scenario == "happy_path":
-            knowledge = f"Your {carrier} package was delivered safely inside your {location}. The garage door has been confirmed closed. No action needed."
-        elif scenario == "theft_suspicious":
-            knowledge = f"Suspicious activity detected after {carrier} delivery at your {location}. An unknown person was detected near your package. Please check your security camera immediately."
-        elif scenario == "door_stuck_open":
-            knowledge = f"Your garage door is stuck open after {carrier} delivery. Package is inside but the garage is unsecured. Action required."
-        else:
-            knowledge = f"{carrier} delivery to your {location}. Status: {status.replace('_', ' ')}."
+        knowledge = _scenario_intelligence(carrier, scenario, risk_score, delivery)
 
     # Status badges
     if risk_score >= 0.75:
@@ -180,3 +85,52 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
                     <span class="notif-tag" style="color:#94a3b8;">&#127968; {location}</span>
                     <span class="notif-tag" style="color:#94a3b8;">&#128666; {carrier}</span>
                     {risk_label}</div></div></div></div>"""
+
+
+def _scenario_intelligence(carrier: str, scenario: str, risk_score: float, d: dict) -> str:
+    """Generate rich, scenario-aware intelligence text for the Before/After comparison."""
+    n_events = len(d.get("event_timeline", []))
+    factors = d.get("risk_factors", [])
+
+    msgs = {
+        "happy_path": (
+            f"Your {carrier} package was safely delivered inside your garage. "
+            f"Analyzed {n_events} sensor events — door opened, package confirmed, door closed and locked. "
+            f"No risk factors detected. No action needed."
+        ),
+        "front_door_misdelivery": (
+            f"{carrier} left your package at the front door instead of the garage. "
+            f"Analyzed {n_events} sensor events — camera detected package outside, not in the secure garage zone. "
+            f"Risk: exposed to weather and theft ({risk_score:.0%}). Retrieve your package or enable garage-only delivery."
+        ),
+        "package_behind_car": (
+            f"Your {carrier} package was placed behind your car in the garage — "
+            f"it could be crushed when you back out. "
+            f"Analyzed {n_events} sensor events — camera confirmed package near vehicle. "
+            f"Move the package before driving ({risk_score:.0%} risk)."
+        ),
+        "door_stuck_open": (
+            f"Your garage door is stuck open after {carrier} delivery. "
+            f"Package was placed inside, but the door failed to close — "
+            f"garage is unsecured and exposed to weather and intruders. "
+            f"Analyzed {n_events} events over 10+ minutes with no door-close signal. Immediate action required ({risk_score:.0%} risk)."
+        ),
+        "no_package_placed": (
+            f"Garage door opened for {carrier} but no package was detected inside. "
+            f"Analyzed {n_events} sensor events — motion was detected but camera confirmed no package in the garage zone. "
+            f"Possible missed delivery or wrong drop-off location ({risk_score:.0%} risk)."
+        ),
+        "delivery_timeout": (
+            f"Your expected {carrier} delivery never arrived. "
+            f"Monitored for the full delivery window with only {n_events} events — "
+            f"no carrier activity, no person detected, no package placed. "
+            f"Contact {carrier} for a status update."
+        ),
+        "theft_suspicious": (
+            f"An unknown person was detected near your {carrier} package at the front door "
+            f"minutes after delivery. "
+            f"Analyzed {n_events} sensor events — camera flagged a second person after the driver left. "
+            f"Package may be at risk of theft ({risk_score:.0%} risk). Check your camera immediately."
+        ),
+    }
+    return msgs.get(scenario, f"{carrier} delivery analyzed with {n_events} events. Risk: {risk_score:.0%}.")

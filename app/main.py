@@ -11,12 +11,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import streamlit as st
 import streamlit_shadcn_ui as ui
+from streamlit_autorefresh import st_autorefresh
 from styles import THEME_CSS
 import config
 import couchbase_client as cb
 
 st.set_page_config(
-    page_title="myQ Smart Delivery - Chamberlain",
+    page_title="myQ Smart Delivery Intelligence",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -66,6 +67,14 @@ if selected_tab == "My myQ":
     import tab_home
     tab_home.render(cluster)
 elif selected_tab == "myQ Command Center":
+    # Auto-refresh when Command Center is active and generator is running (or just started)
+    metrics = cb.get_pipeline_metrics(cluster)
+    gen_live = (metrics and metrics.get("running", False)) or st.session_state.get("gen_starting", False)
+    if gen_live:
+        st_autorefresh(interval=3000, key="ops_autorefresh")
+        # Clear the starting flag once metrics confirm the generator is live
+        if metrics and metrics.get("running", False):
+            st.session_state.pop("gen_starting", None)
     import tab_ops
     tab_ops.render(cluster)
 else:

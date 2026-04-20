@@ -1,6 +1,7 @@
 """
 Couchbase Capella Setup - SmartDelivery
-Creates bucket, 2 scopes (rawdata + processeddata), 7 collections, GSI indexes, vector index.
+Creates bucket, 2 scopes (rawdata + processeddata), 5 collections, GSI indexes,
+deploys eventing functions (enrichment + embedding pipelines), and vector index.
 Usage: python scripts/setup_couchbase.py
 """
 
@@ -17,16 +18,28 @@ from couchbase.auth import PasswordAuthenticator
 from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions, ClusterTimeoutOptions
 from couchbase.exceptions import ScopeAlreadyExistsException, CollectionAlreadyExistsException
+from couchbase.management.eventing import (
+    EventingFunctionManager,
+    EventingFunction,
+    EventingFunctionKeyspace,
+    EventingFunctionBucketBinding,
+    EventingFunctionBucketAccess,
+    EventingFunctionUrlBinding,
+    EventingFunctionUrlAuthBearer,
+    EventingFunctionSettings,
+    EventingFunctionDcpBoundary,
+    EventingFunctionState,
+)
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-BUCKET = os.getenv("CB_BUCKET", "chamberlain")
+BUCKET = os.getenv("CB_BUCKET", "smartdelivery")
 SCOPES = {
     "rawdata": ["homes", "events", "deliveries", "alerts"],
-    "processeddata": ["events", "deliveries", "alerts"],
+    "processeddata": ["deliveries"],
 }
 
 
@@ -123,6 +136,127 @@ class CapellaAPI:
             log.warning("  Collection '%s.%s': %s %s", scope, collection, r.status_code, r.text)
 
 
+def deploy_eventing_functions(cluster, bucket):
+    """Deploy eventing functions using Couchbase SDK EventingFunctionManager."""
+    eventing_mgr = cluster.eventing_functions()
+    eventing_dir = Path(__file__).resolve().parent.parent / "eventing"
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+
+    # ── Function 1: DeliveryKnowledgePipeline ──
+    log.info("Deploying DeliveryKnowledgePipeline...")
+    code1 = (eventing_dir / "delivery_knowledge_pipeline.js").read_text()
+
+    func1 = EventingFunction(
+        name="DeliveryKnowledgePipeline",
+        code=code1,
+        source_keyspace=EventingFunctionKeyspace(
+            bucket=bucket, scope="rawdata", collection="deliveries"
+        ),
+        metadata_keyspace=EventingFunctionKeyspace(bucket=bucket),
+        bucket_bindings=[
+            EventingFunctionBucketBinding(
+                alias="dst",
+                name=EventingFunctionKeyspace(
+                    bucket=bucket, scope="processeddata", collection="deliveries"
+                ),
+                access=EventingFunctionBucketAccess.ReadWrite,
+            ),
+            EventingFunctionBucketBinding(
+                alias="src_events",
+                name=EventingFunctionKeyspace(
+                    bucket=bucket, scope="rawdata", collection="events"
+                ),
+                access=EventingFunctionBucketAccess.ReadOnly,
+            ),
+        ],
+        settings=EventingFunctionSettings(
+            description="Enriches raw deliveries with knowledge narratives, "
+                        "risk assessments, and PII redaction. "
+                        "Writes to processeddata.deliveries.",
+            dcp_stream_boundary=EventingFunctionDcpBoundary.Everything,
+        ),
+    )
+    try:
+        eventing_mgr.upsert_function(func1)
+        log.info("  Upserted: DeliveryKnowledgePipeline")
+    except Exception as e:
+        log.warning("  Upsert DeliveryKnowledgePipeline: %s", e)
+
+    # ── Function 2: VectorEmbeddingPipeline ──
+    log.info("Deploying VectorEmbeddingPipeline...")
+    code2 = (eventing_dir / "vector_embedding_pipeline.js").read_text()
+
+    func2 = EventingFunction(
+        name="VectorEmbeddingPipeline",
+        code=code2,
+        source_keyspace=EventingFunctionKeyspace(
+            bucket=bucket, scope="processeddata", collection="deliveries"
+        ),
+        metadata_keyspace=EventingFunctionKeyspace(bucket=bucket),
+        bucket_bindings=[
+            EventingFunctionBucketBinding(
+                alias="dst",
+                name=EventingFunctionKeyspace(
+                    bucket=bucket, scope="processeddata", collection="deliveries"
+                ),
+                access=EventingFunctionBucketAccess.ReadWrite,
+            ),
+        ],
+        url_bindings=[
+            EventingFunctionUrlBinding(
+                hostname="https://api.openai.com",
+                alias="openai",
+                allow_cookies=False,
+                validate_ssl_certificate=True,
+                auth=EventingFunctionUrlAuthBearer(key=openai_key),
+            ),
+        ],
+        settings=EventingFunctionSettings(
+            description="Generates OpenAI text-embedding-3-small vectors "
+                        "for enriched deliveries. Marks docs as AI-ready.",
+            dcp_stream_boundary=EventingFunctionDcpBoundary.Everything,
+        ),
+    )
+    try:
+        eventing_mgr.upsert_function(func2)
+        log.info("  Upserted: VectorEmbeddingPipeline")
+    except Exception as e:
+        log.warning("  Upsert VectorEmbeddingPipeline: %s", e)
+
+    # ── Deploy both functions ──
+    time.sleep(5)
+    for fn_name in ("DeliveryKnowledgePipeline", "VectorEmbeddingPipeline"):
+        try:
+            eventing_mgr.deploy_function(fn_name)
+            log.info("  Deployed: %s", fn_name)
+        except Exception as e:
+            if "already deployed" in str(e).lower():
+                log.info("  Already deployed: %s", fn_name)
+            else:
+                log.warning("  Deploy %s: %s", fn_name, e)
+
+    # ── Wait for deployment ──
+    log.info("  Waiting for eventing functions to finish deploying...")
+    for attempt in range(30):
+        time.sleep(5)
+        try:
+            statuses = eventing_mgr.functions_status()
+            all_deployed = True
+            if statuses.functions:
+                for fn in statuses.functions:
+                    state = fn.state
+                    log.info("    %s: %s", fn.name, state)
+                    if state != EventingFunctionState.Deployed:
+                        all_deployed = False
+            if all_deployed and statuses.functions:
+                log.info("  All eventing functions deployed!")
+                break
+        except Exception as e:
+            log.warning("  Status check: %s", e)
+    else:
+        log.warning("  Timeout waiting for eventing deployment. Check Capella UI.")
+
+
 def main():
     for var in ("CAPELLA_API_SECRET", "CB_CONN_STR", "CB_USERNAME", "CB_PASSWORD"):
         if not os.getenv(var):
@@ -187,13 +321,22 @@ def main():
 
     # Secondary indexes
     secondaries = [
+        # rawdata.deliveries
         ("idx_raw_deliveries_status", "rawdata", "deliveries", "status, created_at DESC", None),
+        ("idx_raw_deliveries_created", "rawdata", "deliveries", "created_at DESC", None),
         ("idx_raw_deliveries_home", "rawdata", "deliveries", "home_id, status", None),
+        # rawdata.events
         ("idx_raw_events_home", "rawdata", "events", "home_id, `timestamp` DESC", None),
+        # rawdata.alerts
+        ("idx_raw_alerts_triggered", "rawdata", "alerts", "triggered_at DESC", None),
+        ("idx_raw_alerts_severity", "rawdata", "alerts", "severity, triggered_at DESC", None),
+        # processeddata.deliveries
         ("idx_proc_deliveries_status", "processeddata", "deliveries", "status, created_at DESC", None),
         ("idx_proc_deliveries_scenario", "processeddata", "deliveries", "scenario_type, status", None),
+        ("idx_proc_deliveries_scenario_status", "processeddata", "deliveries", "scenario_type, status, created_at DESC", None),
         ("idx_proc_deliveries_aiready", "processeddata", "deliveries", "is_ai_ready, status", None),
-        ("idx_proc_alerts_severity", "processeddata", "alerts", "severity, triggered_at DESC", None),
+        ("idx_proc_deliveries_carrier", "processeddata", "deliveries", "carrier, created_at DESC", None),
+        ("idx_proc_deliveries_risk", "processeddata", "deliveries", "risk_score, created_at DESC", None),
     ]
     for idx_name, scope, col, fields, where in secondaries:
         w = f" WHERE {where}" if where else ""
@@ -203,20 +346,21 @@ def main():
         )
     time.sleep(10)
 
-    # Phase 3: Hyperscale Vector Index for APPROX_VECTOR_DISTANCE
+    # Phase 3: Hyperscale Vector Index note
     log.info("")
     log.info("=" * 60)
     log.info("Phase 3: Hyperscale Vector Search Index")
     log.info("=" * 60)
-    vec_idx = "idx_delivery_embedding"
-    log.info("  Note: Vector index requires training data (embeddings).")
-    log.info("  Run event generator + eventing first, then create this index.")
-    create_index(
-        f"""CREATE VECTOR INDEX `{vec_idx}`
-            ON `{BUCKET}`.`processeddata`.`deliveries`(embedding VECTOR)
-            WITH {{"dimension": 1536, "similarity": "COSINE", "description": "IVF,SQ8"}}""",
-        vec_idx,
-    )
+    log.info("  Skipped: IVF vector index requires 200+ embedded docs to build.")
+    log.info("  The app will auto-create the index once enough embeddings exist.")
+    log.info("  (Or manually: python scripts/create_vector_index.py)")
+
+    # Phase 4: Deploy Eventing Functions via SDK
+    log.info("")
+    log.info("=" * 60)
+    log.info("Phase 4: Eventing Functions (SDK EventingFunctionManager)")
+    log.info("=" * 60)
+    deploy_eventing_functions(cluster, BUCKET)
 
     log.info("")
     log.info("=" * 60)
@@ -224,8 +368,7 @@ def main():
     log.info("=" * 60)
     log.info("Next steps:")
     log.info("  1. cd event-generator && go run main.go --homes 100 --scenarios 200")
-    log.info("  2. Deploy eventing functions in Capella UI")
-    log.info("  3. streamlit run app/main.py")
+    log.info("  2. streamlit run app/main.py")
 
 
 if __name__ == "__main__":
