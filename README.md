@@ -28,7 +28,7 @@ The consumer-facing dashboard shows real-time garage door status, active deliver
 ![My myQ Tab](screenshots/my-myq-tab.png)
 
 ### myQ Command Center -- Fleet Operations
-Live fleet monitoring with real-time stats across all 200 homes. Watch deliveries, alerts, and AI-ready records climb at 3,000+ ops/sec. Includes live pipeline throughput metrics and automatic PII redaction powered by Couchbase Eventing.
+Live fleet monitoring with real-time stats across all 1 million homes. Watch deliveries, alerts, and AI-ready records climb at 50,000+ ops/sec. Includes live pipeline throughput metrics and automatic PII redaction powered by Couchbase Eventing.
 
 ![myQ Command Center](screenshots/command-center-tab.png)
 
