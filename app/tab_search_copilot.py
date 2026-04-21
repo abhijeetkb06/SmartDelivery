@@ -76,19 +76,21 @@ def render_search(cluster):
             st.warning("Please enter a search query")
         else:
             with st.spinner("Searching similar deliveries..."):
-                query_vec = _get_embedding(query)
-
-                results, display_query = cb.vector_search_with_filters(
-                    cluster, query_vec,
-                    carrier="" if carrier == "All" else carrier,
-                    scenario="" if scenario == "All" else scenario,
-                    status="" if status == "All" else status,
-                    risk_level="" if risk_level == "All" else risk_level,
-                    limit=limit,
-                )
-                st.session_state.search_results = results
-                st.session_state.search_query_display = display_query
-                st.session_state.searched = True
+                try:
+                    query_vec = _get_embedding(query)
+                    results, display_query = cb.vector_search_with_filters(
+                        cluster, query_vec,
+                        carrier="" if carrier == "All" else carrier,
+                        scenario="" if scenario == "All" else scenario,
+                        status="" if status == "All" else status,
+                        risk_level="" if risk_level == "All" else risk_level,
+                        limit=limit,
+                    )
+                    st.session_state.search_results = results
+                    st.session_state.search_query_display = display_query
+                    st.session_state.searched = True
+                except Exception as e:
+                    st.error(f"Search failed: {e}")
 
     # Results display
     if st.session_state.searched and st.session_state.search_results:
@@ -153,8 +155,7 @@ def render_search(cluster):
             score = abs(r.get("score", r.get("similarity", 0)))
             scenario_name = scenario_friendly_name(r.get("scenario_type", ""))
             summary = r.get("knowledge_summary", "No summary available")
-            risk_score = r.get("risk_score", 0)
-
+            risk_score = r.get("risk_score", 0) or 0
             st.markdown(f"""
             <div class="result-card">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -293,7 +294,7 @@ def _retrieve_context(cluster, question: str) -> dict:
     scenarios = set()
     all_factors = []
     for r in results:
-        rs = r.get("risk_score", 0)
+        rs = r.get("risk_score", 0) or 0
         if rs >= 0.75:
             risk_counts["critical"] += 1
         elif rs >= 0.45:
@@ -323,7 +324,7 @@ def _retrieve_context(cluster, question: str) -> dict:
     context_parts = [summary_header]
     for i, r in enumerate(results):
         ra = r.get("risk_assessment") or {}
-        risk_score = r.get("risk_score", 0)
+        risk_score = r.get("risk_score", 0) or 0
         level = ra.get("level", "") if ra else ""
         factors = r.get("risk_factors", [])
         recs = ra.get("recommendations", []) if ra else []
@@ -441,8 +442,16 @@ def render_copilot(cluster):
         ''', unsafe_allow_html=True)
 
         # Steps 1-4: Retrieve context with timing
-        with st.spinner("Retrieving relevant deliveries..."):
-            ctx = _retrieve_context(cluster, question)
+        try:
+            with st.spinner("Retrieving relevant deliveries..."):
+                ctx = _retrieve_context(cluster, question)
+        except Exception as e:
+            st.session_state.chat_history.append({
+                "role": "assistant",
+                "content": f"Sorry, I couldn't retrieve delivery context: {e}",
+                "sources": [],
+            })
+            st.rerun()
 
         if not ctx["results"]:
             st.session_state.chat_history.append({
@@ -455,30 +464,35 @@ def render_copilot(cluster):
             st.rerun()
 
         # Step 5: Stream LLM response
-        oai = OpenAI(api_key=OPENAI_API_KEY)
-        messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Context from Couchbase knowledge base:\n{ctx['context_text']}\n\nUser question: {question}"},
-        ]
+        try:
+            oai = OpenAI(api_key=OPENAI_API_KEY)
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Context from Couchbase knowledge base:\n{ctx['context_text']}\n\nUser question: {question}"},
+            ]
 
-        gen_start = time.perf_counter()
-        stream = oai.chat.completions.create(model=CHAT_MODEL, messages=messages, temperature=0.3, stream=True)
-        gen_timings = {}
+            gen_start = time.perf_counter()
+            stream = oai.chat.completions.create(model=CHAT_MODEL, messages=messages, temperature=0.3, stream=True)
+            gen_timings = {}
 
-        def _token_gen():
-            first_token = True
-            for chunk in stream:
-                if not chunk.choices:
-                    continue
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    if first_token:
-                        gen_timings["ttft_ms"] = (time.perf_counter() - gen_start) * 1000
-                        first_token = False
-                    yield delta.content
-            gen_timings["generate_ms"] = (time.perf_counter() - gen_start) * 1000
+            def _token_gen():
+                first_token = True
+                for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        if first_token:
+                            gen_timings["ttft_ms"] = (time.perf_counter() - gen_start) * 1000
+                            first_token = False
+                        yield delta.content
+                gen_timings["generate_ms"] = (time.perf_counter() - gen_start) * 1000
 
-        full_response = st.write_stream(_token_gen())
+            full_response = st.write_stream(_token_gen())
+        except Exception as e:
+            full_response = f"Sorry, I encountered an error generating a response: {e}"
+            st.error(full_response)
+            gen_timings = {}
 
         # Build final timings
         timings = ctx["timings"].copy()

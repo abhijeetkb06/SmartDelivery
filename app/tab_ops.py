@@ -122,13 +122,20 @@ def _start_vector_index_watcher():
 
 def _start_generator(cluster: Cluster):
     """Launch Go event generator as a background process."""
-    proc = subprocess.Popen(
-        [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200", "--count", "1000000"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    st.session_state["gen_pid"] = proc.pid
+    if not _GEN_BIN.exists():
+        st.error(f"Event generator binary not found at {_GEN_BIN}. Please build it first.")
+        return
+    try:
+        proc = subprocess.Popen(
+            [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200", "--count", "1000000"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        st.session_state["gen_pid"] = proc.pid
+    except Exception as e:
+        st.error(f"Failed to start event generator: {e}")
+        return
     # Kick off background vector index creation (waits 30s, then auto-creates when ready)
     _start_vector_index_watcher()
 
@@ -191,15 +198,15 @@ def render(cluster: Cluster):
     if is_live:
         total_deliveries = metrics.get("total_deliveries", 0)
         total_alerts = metrics.get("total_alerts", 0)
-        if cache_fresh:
+        if cache_fresh and "proc_stats" in cache:
             proc_stats = cache["proc_stats"]
         else:
             proc_stats = cb.get_processing_stats(cluster)
             st.session_state["_ops_stats_cache"] = {"proc_stats": proc_stats, "_ts": now}
         ai_ready = proc_stats.get("processed_count", 0)
-        homes_count = 200  # Homes are pre-generated, no need to query
+        homes_count = 1_000_000  # Hardcoded — homes are not stored in Couchbase
     else:
-        if cache_fresh:
+        if cache_fresh and "counts" in cache:
             counts = cache["counts"]
             ai_ready = cache["ai_ready"]
             proc_stats = cache["proc_stats"]
@@ -213,7 +220,7 @@ def render(cluster: Cluster):
             }
         total_deliveries = counts.get('rawdata.deliveries', 0)
         total_alerts = counts.get('rawdata.alerts', 0)
-        homes_count = counts.get('rawdata.homes', 0)
+        homes_count = 1_000_000  # Hardcoded — homes are not stored in Couchbase
 
     st.markdown('<div class="section-title">myQ Command Center</div>', unsafe_allow_html=True)
 
@@ -233,7 +240,7 @@ def render(cluster: Cluster):
                 st.rerun()
     with status_col:
         if is_live:
-            rate = metrics.get("actual_rate", 0)
+            rate = metrics.get("actual_rate", 0) or 0
             pid = st.session_state.get("gen_pid", "?")
             st.markdown(
                 f'<div style="padding:0.5rem 0;font-size:0.82rem;color:#4ade80;">'
@@ -293,13 +300,13 @@ def render(cluster: Cluster):
 
     if is_live:
         # Generator is running — show live metrics
-        rate = metrics.get("actual_rate", 0)
-        total_events = metrics.get("total_events_ingested", 0)
-        total_deliveries = metrics.get("total_deliveries", 0)
-        total_alerts = metrics.get("total_alerts", 0)
-        elapsed = metrics.get("elapsed_seconds", 0)
-        raw_cnt = proc_stats.get("raw_count", 0)
-        proc_cnt = proc_stats.get("processed_count", 0)
+        rate = metrics.get("actual_rate", 0) or 0
+        total_events = metrics.get("total_events_ingested", 0) or 0
+        total_deliveries = metrics.get("total_deliveries", 0) or 0
+        total_alerts = metrics.get("total_alerts", 0) or 0
+        elapsed = metrics.get("elapsed_seconds", 0) or 0
+        raw_cnt = proc_stats.get("raw_count", 0) or 0
+        proc_cnt = proc_stats.get("processed_count", 0) or 0
         processing_pct = (proc_cnt / raw_cnt * 100) if raw_cnt > 0 else 0
 
         st.markdown(
@@ -405,7 +412,10 @@ def render(cluster: Cluster):
         unsafe_allow_html=True)
 
     # Get one raw delivery and its processed counterpart to show the redaction
-    raw_deliveries = cb.get_raw_deliveries(cluster, limit=1)
+    try:
+        raw_deliveries = cb.get_raw_deliveries(cluster, limit=1)
+    except Exception:
+        raw_deliveries = []
     if raw_deliveries:
         raw = raw_deliveries[0]
         doc_id = raw.get("doc_id", raw.get("id", ""))
@@ -497,8 +507,8 @@ def render(cluster: Cluster):
 def _render_alert_card(alert: dict):
     severity = alert.get("severity", "medium")
     color = _SEVERITY_COLORS.get(severity, "#6366f1")
-    message = alert.get("message", "")
-    address = alert.get("address", "")
+    message = alert.get("message", "") or ""
+    address = alert.get("address", "") or ""
     alert_type = alert.get("alert_type", "").replace("_", " ").title()
     triggered = alert.get("triggered_at", "")
     time_str = triggered[11:16] if len(triggered) >= 16 else triggered

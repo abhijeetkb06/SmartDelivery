@@ -42,7 +42,7 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
 
     # ── Right side: Couchbase intelligence ──
     carrier = delivery.get("carrier", "Unknown")
-    risk_score = delivery.get("risk_score", 0)
+    risk_score = delivery.get("risk_score", 0) or 0
     scenario = delivery.get("scenario_type", "")
     status = delivery.get("status", "")
     knowledge = delivery.get("knowledge_summary", "")

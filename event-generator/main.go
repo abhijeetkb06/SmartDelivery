@@ -51,38 +51,23 @@ func main() {
 	fmt.Println("      Connected!")
 
 	if *continuous {
-		// Write 200 homes to Couchbase so the dashboard shows "Homes Monitored"
+		// Generate homes in-memory only (used by delivery producer for realistic addresses)
 		homes := generator.GenerateHomes(200)
-		homeDocs := make(map[string]interface{}, len(homes))
-		for _, h := range homes {
-			homeDocs[h.ID] = h
-		}
-		client.BulkUpsert("homes", homeDocs)
-		fmt.Printf("Wrote %d homes\n", len(homes))
 
-		runContinuousFast(client, *rate, *duration, *workers, *batchSize, *maxCount)
+		runContinuousFast(client, *rate, *duration, *workers, *batchSize, *maxCount, homes)
 		return
 	}
 
 	// ── Batch mode (original) ──
-	fmt.Printf("Homes: %d | Scenarios: %d\n\n", *numHomes, *numScenarios)
+	fmt.Printf("Scenarios: %d\n\n", *numScenarios)
 
-	// Generate homes
-	fmt.Printf("[2/5] Generating %d homes...\n", *numHomes)
+	// Generate homes in-memory only (used for realistic addresses in deliveries)
+	fmt.Println("[1/3] Generating homes in memory...")
 	homes := generator.GenerateHomes(*numHomes)
-	homeDocs := make(map[string]interface{}, len(homes))
-	for _, h := range homes {
-		homeDocs[h.ID] = h
-	}
-	hc, err := client.BulkUpsert("homes", homeDocs)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to upsert homes: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("      Wrote %d homes\n", hc)
+	fmt.Printf("      Generated %d homes (in-memory only, not written to Couchbase)\n", len(homes))
 
 	// Generate delivery scenarios
-	fmt.Printf("[3/5] Generating %d delivery scenarios...\n", *numScenarios)
+	fmt.Printf("[2/3] Generating %d delivery scenarios...\n", *numScenarios)
 	allEvents := make(map[string]interface{})
 	allDeliveries := make(map[string]interface{})
 	allAlerts := make(map[string]interface{})
@@ -119,7 +104,7 @@ func main() {
 		fmt.Printf("        %-20s %3d (%5.1f%%)\n", status, count, pct)
 	}
 
-	fmt.Printf("[4/5] Writing %d events...\n", len(allEvents))
+	fmt.Printf("[3/3] Writing %d events...\n", len(allEvents))
 	ec, err := client.BulkUpsert("events", allEvents)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to upsert events: %v\n", err)
@@ -144,14 +129,12 @@ func main() {
 	fmt.Printf("      Wrote %d alerts\n", ac)
 
 	fmt.Println()
-	fmt.Println("[5/5] Summary:")
-	fmt.Printf("      Homes:      %d\n", hc)
+	fmt.Println("Summary:")
 	fmt.Printf("      Events:     %d\n", ec)
 	fmt.Printf("      Deliveries: %d\n", dc)
 	fmt.Printf("      Alerts:     %d\n", ac)
 	fmt.Println()
 
-	_ = models.Home{}
 	fmt.Println("=== Done! Raw data loaded into rawdata.* collections ===")
 }
 
@@ -179,7 +162,7 @@ type bulkDoc struct {
 	value      interface{}
 }
 
-func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time.Duration, numWorkers int, batchSize int, maxDeliveries int) {
+func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time.Duration, numWorkers int, batchSize int, maxDeliveries int, homes []models.Home) {
 	fmt.Println()
 	fmt.Println("=== High-Performance Continuous Event Stream ===")
 	fmt.Printf("Target rate:    %d deliveries/sec\n", targetRate)
@@ -215,9 +198,6 @@ func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time
 			cancel()
 		}()
 	}
-
-	// Pre-generate homes for the producer
-	homes := generator.GenerateHomes(200)
 
 	var metrics Metrics
 	metrics.TargetRate = targetRate

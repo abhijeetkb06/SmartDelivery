@@ -17,7 +17,7 @@ def render(cluster: Cluster):
         return
 
     # Build diverse subsets — variety of scenarios so the demo looks realistic
-    alert_pool = [d for d in deliveries if d.get("risk_score", 0) >= 0.45]
+    alert_pool = [d for d in deliveries if (d.get("risk_score", 0) or 0) >= 0.45]
     alert_deliveries = _diverse_pick(alert_pool, total=5)
     recent_deliveries = _diverse_pick(deliveries, total=6)
 
@@ -25,7 +25,10 @@ def render(cluster: Cluster):
     latest = deliveries[0] if deliveries else None
 
     # For the before/after comparison, use a targeted LIMIT 1 query for package_behind_car
-    comparison_delivery = cb.get_raw_delivery_by_scenario(cluster, "package_behind_car") or latest
+    try:
+        comparison_delivery = cb.get_raw_delivery_by_scenario(cluster, "package_behind_car") or latest
+    except Exception:
+        comparison_delivery = latest
     door_closed = True
     if latest and latest.get("scenario_type") == "door_stuck_open":
         door_closed = False
@@ -241,7 +244,7 @@ GET `smartdelivery`.`processeddata`.`deliveries`.`{doc_id}`
                     <div class="alert-banner-desc">{rec_text}</div>
                 </div>
                 <div style="flex-shrink:0;text-align:right;">
-                    <div style="font-size:0.75rem;font-weight:600;color:#ef4444;">{d.get('risk_score',0):.0%} RISK</div>
+                    <div style="font-size:0.75rem;font-weight:600;color:#ef4444;">{(d.get('risk_score',0) or 0):.0%} RISK</div>
                     <div style="font-size:0.68rem;color:#64748b;">{d.get('carrier','')}</div>
                 </div>
             </div>""", unsafe_allow_html=True)
@@ -318,7 +321,7 @@ def _smart_summary(d: dict) -> str:
 
 
 def _render_notification_card(d: dict):
-    risk_score = d.get("risk_score", 0)
+    risk_score = d.get("risk_score", 0) or 0
     scenario = scenario_friendly_name(d.get("scenario_type", ""))
     s_icon = scenario_icon(d.get("scenario_type", ""))
     # Homeowner sees full details — it's their own view
