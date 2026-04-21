@@ -11,7 +11,7 @@ from styles import status_badge, risk_badge, risk_bar_html, scenario_icon, scena
 def render(cluster: Cluster):
     # Homeowner view: query RAWDATA so they see their full name & address
     try:
-        deliveries = cb.get_raw_deliveries(cluster, limit=100)
+        deliveries = cb.get_raw_deliveries(cluster, limit=20)
     except Exception:
         st.warning("Delivery data is still loading. Please wait a moment and refresh.")
         return
@@ -23,6 +23,9 @@ def render(cluster: Cluster):
 
     # ── Section 1: myQ Device Card ──────────────────────────────
     latest = deliveries[0] if deliveries else None
+
+    # For the before/after comparison, use a targeted LIMIT 1 query for package_behind_car
+    comparison_delivery = cb.get_raw_delivery_by_scenario(cluster, "package_behind_car") or latest
     door_closed = True
     if latest and latest.get("scenario_type") == "door_stuck_open":
         door_closed = False
@@ -60,20 +63,20 @@ def render(cluster: Cluster):
         'With Couchbase, it tells you what happened and whether you need to act.</div>',
         unsafe_allow_html=True)
 
-    st.markdown(charts.create_notification_comparison_html(latest), unsafe_allow_html=True)
+    st.markdown(charts.create_notification_comparison_html(comparison_delivery), unsafe_allow_html=True)
 
     # ── Code Spotlight: How Couchbase Intelligence Works ──────────
     with st.expander("View Couchbase Eventing Pipeline", expanded=False):
-        if latest:
-            doc_id = latest.get("doc_id", latest.get("id", ""))
-            carrier = latest.get("carrier", "Unknown")
-            scenario = latest.get("scenario_type", "")
-            owner = latest.get("owner_name", "")
-            address = latest.get("address", "")
-            risk = latest.get("risk_score", 0)
-            location = latest.get("delivery_location", "").replace("_", " ")
-            factors = latest.get("risk_factors", [])
-            timeline = latest.get("event_timeline", [])
+        if comparison_delivery:
+            doc_id = comparison_delivery.get("doc_id", comparison_delivery.get("id", ""))
+            carrier = comparison_delivery.get("carrier", "Unknown")
+            scenario = comparison_delivery.get("scenario_type", "")
+            owner = comparison_delivery.get("owner_name", "")
+            address = comparison_delivery.get("address", "")
+            risk = comparison_delivery.get("risk_score", 0)
+            location = comparison_delivery.get("delivery_location", "").replace("_", " ")
+            factors = comparison_delivery.get("risk_factors", [])
+            timeline = comparison_delivery.get("event_timeline", [])
 
             # Fetch the processed (enriched) counterpart to show real intelligence
             proc = cb.get_delivery_by_id(cluster, "processeddata", doc_id)
@@ -172,7 +175,7 @@ GET `smartdelivery`.`processeddata`.`deliveries`.`{doc_id}`
 -- Latency: &lt;1ms (KV SDK direct lookup)</div>""", unsafe_allow_html=True)
 
             st.markdown("")
-            smart_msg = _smart_summary(latest)
+            smart_msg = _smart_summary(comparison_delivery)
             st.markdown(
                 f'<div style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.25);'
                 f'border-radius:8px;padding:0.75rem 1rem;margin:0.5rem 0;">'

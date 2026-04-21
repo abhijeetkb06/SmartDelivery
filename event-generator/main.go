@@ -29,6 +29,7 @@ func main() {
 	duration := flag.Duration("duration", 0, "Duration for continuous mode (0 = until stopped)")
 	workers := flag.Int("workers", 40, "Number of writer goroutines in continuous mode")
 	batchSize := flag.Int("batch", 100, "Batch size for collection.Do() bulk writes")
+	maxCount := flag.Int("count", 0, "Max deliveries to generate in continuous mode (0 = unlimited)")
 	flag.Parse()
 
 	// Load config
@@ -59,7 +60,7 @@ func main() {
 		client.BulkUpsert("homes", homeDocs)
 		fmt.Printf("Wrote %d homes\n", len(homes))
 
-		runContinuousFast(client, *rate, *duration, *workers, *batchSize)
+		runContinuousFast(client, *rate, *duration, *workers, *batchSize, *maxCount)
 		return
 	}
 
@@ -178,15 +179,18 @@ type bulkDoc struct {
 	value      interface{}
 }
 
-func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time.Duration, numWorkers int, batchSize int) {
+func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time.Duration, numWorkers int, batchSize int, maxDeliveries int) {
 	fmt.Println()
 	fmt.Println("=== High-Performance Continuous Event Stream ===")
 	fmt.Printf("Target rate:    %d deliveries/sec\n", targetRate)
 	fmt.Printf("Workers:        %d\n", numWorkers)
 	fmt.Printf("Batch size:     %d (collection.Do() bulk API)\n", batchSize)
+	if maxDeliveries > 0 {
+		fmt.Printf("Max deliveries: %d\n", maxDeliveries)
+	}
 	if maxDuration > 0 {
 		fmt.Printf("Duration:       %v\n", maxDuration)
-	} else {
+	} else if maxDeliveries == 0 {
 		fmt.Println("Duration:       until Ctrl+C")
 	}
 	fmt.Println()
@@ -271,6 +275,12 @@ func runContinuousFast(client *cbclient.Client, targetRate int, maxDuration time
 				}
 				atomic.AddInt64(&metrics.TotalDeliveries, 1)
 
+				// Auto-stop when delivery limit is reached
+				if maxDeliveries > 0 && atomic.LoadInt64(&metrics.TotalDeliveries) >= int64(maxDeliveries) {
+					fmt.Printf("\n\nReached delivery limit (%d). Auto-stopping...\n", maxDeliveries)
+					cancel()
+					return
+				}
 				// Feed alert if any
 				if alert != nil {
 					select {

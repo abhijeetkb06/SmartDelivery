@@ -58,7 +58,7 @@ def _vector_index_watcher():
             # Check if index already exists and is online
             try:
                 rows = list(cluster.query(
-                    "SELECT state FROM system:indexes WHERE name = 'idx_delivery_embedding'"
+                    "SELECT state FROM system:indexes WHERE name = 'idx_delivery_vectors'"
                 ))
                 if rows and rows[0].get("state") == "online":
                     _log.info("[VectorWatcher] Vector index already online. Exiting.")
@@ -82,7 +82,7 @@ def _vector_index_watcher():
                 # Drop broken index if exists
                 try:
                     list(cluster.query(
-                        f"DROP INDEX `idx_delivery_embedding` ON "
+                        f"DROP INDEX `idx_delivery_vectors` ON "
                         f"`{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`"
                     ))
                     time.sleep(3)
@@ -92,7 +92,7 @@ def _vector_index_watcher():
                 # Create the vector index
                 try:
                     list(cluster.query(f"""
-                        CREATE VECTOR INDEX `idx_delivery_embedding`
+                        CREATE VECTOR INDEX `idx_delivery_vectors`
                         ON `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`(embedding VECTOR)
                         WITH {{"dimension": 1536, "similarity": "COSINE", "description": "IVF,SQ8"}}
                     """))
@@ -123,7 +123,7 @@ def _start_vector_index_watcher():
 def _start_generator(cluster: Cluster):
     """Launch Go event generator as a background process."""
     proc = subprocess.Popen(
-        [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200"],
+        [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200", "--count", "1000000"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -134,15 +134,41 @@ def _start_generator(cluster: Cluster):
 
 
 def _stop_generator(cluster: Cluster):
-    """Kill the generator process by PID and clear the running flag in Couchbase."""
+    """Kill the generator process reliably and clear the running flag in Couchbase.
+
+    Strategy:
+      1. Try killing by stored PID (process group SIGTERM, then SIGKILL).
+      2. Fallback: pkill by binary name to catch orphaned processes.
+      3. Clear the running flag in Couchbase so the UI stops treating it as live.
+    """
     pid = st.session_state.get("gen_pid")
+
+    # 1. Kill by stored PID
     if pid:
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        except (ProcessLookupError, PermissionError):
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            # Give it a moment to shut down, then force-kill if still alive
+            time.sleep(0.5)
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # already dead, good
+        except (ProcessLookupError, PermissionError, OSError):
             pass
+
+    # 2. Fallback: kill any remaining instances by binary name
+    try:
+        subprocess.run(
+            ["pkill", "-9", "-f", "smart-delivery-gen"],
+            capture_output=True, timeout=5,
+        )
+    except Exception:
+        pass
+
     st.session_state.pop("gen_pid", None)
-    # Clear the running flag in Couchbase so the UI stops treating it as live
+
+    # 3. Clear the running flag in Couchbase so the UI stops treating it as live
     try:
         col = cluster.bucket("smartdelivery").scope("rawdata").collection("events")
         col.upsert("pipeline_metrics", {"running": False})
@@ -156,16 +182,35 @@ def render(cluster: Cluster):
     is_live = metrics is not None and metrics.get("running", False)
 
     # ── Section 1: Fleet Overview Stats ─────────────────────────
-    # When generator is running, use its live metrics (fast) instead of slow COUNT(*) queries
+    # Cache stats in session_state with a 5-second TTL so Streamlit reruns
+    # don't fire 12+ N1QL queries each time.
+    now = time.time()
+    cache = st.session_state.get("_ops_stats_cache")
+    cache_fresh = cache is not None and (now - cache.get("_ts", 0)) < 5
+
     if is_live:
         total_deliveries = metrics.get("total_deliveries", 0)
         total_alerts = metrics.get("total_alerts", 0)
-        proc_stats = cb.get_processing_stats(cluster)
+        if cache_fresh:
+            proc_stats = cache["proc_stats"]
+        else:
+            proc_stats = cb.get_processing_stats(cluster)
+            st.session_state["_ops_stats_cache"] = {"proc_stats": proc_stats, "_ts": now}
         ai_ready = proc_stats.get("processed_count", 0)
         homes_count = 200  # Homes are pre-generated, no need to query
     else:
-        counts = cb.get_counts(cluster)
-        ai_ready = cb.get_ai_ready_count(cluster)
+        if cache_fresh:
+            counts = cache["counts"]
+            ai_ready = cache["ai_ready"]
+            proc_stats = cache["proc_stats"]
+        else:
+            counts = cb.get_counts(cluster)
+            ai_ready = cb.get_ai_ready_count(cluster)
+            proc_stats = cb.get_processing_stats(cluster)
+            st.session_state["_ops_stats_cache"] = {
+                "counts": counts, "ai_ready": ai_ready,
+                "proc_stats": proc_stats, "_ts": now,
+            }
         total_deliveries = counts.get('rawdata.deliveries', 0)
         total_alerts = counts.get('rawdata.alerts', 0)
         homes_count = counts.get('rawdata.homes', 0)
@@ -241,8 +286,7 @@ def render(cluster: Cluster):
         </div>""", unsafe_allow_html=True)
 
     # ── Section 2: Live Pipeline Performance ────────────────────
-    if not is_live:
-        proc_stats = cb.get_processing_stats(cluster)
+    # proc_stats already loaded above (cached)
 
     st.markdown(f'<div class="section-title">{icon("zap", size=18, color="#fbbf24")} Live Pipeline Performance</div>',
                 unsafe_allow_html=True)
@@ -436,7 +480,13 @@ def render(cluster: Cluster):
     with fc2:
         alert_limit = st.selectbox("Show", [10, 20, 50], index=0, label_visibility="collapsed")
     severity = "" if severity_filter == "All" else severity_filter
-    alerts = cb.get_recent_alerts(cluster, severity=severity, limit=alert_limit)
+    alert_cache_key = f"_alerts_{severity}_{alert_limit}"
+    alert_cache = st.session_state.get(alert_cache_key)
+    if alert_cache and (now - alert_cache.get("_ts", 0)) < 5:
+        alerts = alert_cache["data"]
+    else:
+        alerts = cb.get_recent_alerts(cluster, severity=severity, limit=alert_limit)
+        st.session_state[alert_cache_key] = {"data": alerts, "_ts": now}
     if alerts:
         for alert in alerts:
             _render_alert_card(alert)

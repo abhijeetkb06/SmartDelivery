@@ -31,7 +31,10 @@ def _bucket(cluster: Cluster):
 
 # ── Collection counts ──────────────────────────────────────────
 def get_counts(cluster: Cluster) -> dict:
-    """Return document counts for raw and processed scopes."""
+    """Return document counts for raw and processed scopes.
+
+    Simple COUNT(*) without WHERE is fast — Couchbase serves it from index metadata.
+    """
     counts = {}
     for scope, cols in [(SCOPE_RAW, ["homes", "events", "deliveries", "alerts"]),
                         (SCOPE_PROCESSED, ["deliveries"])]:
@@ -49,17 +52,29 @@ def get_counts(cluster: Cluster) -> dict:
 
 # ── Delivery queries ───────────────────────────────────────────
 def get_raw_deliveries(cluster: Cluster, limit: int = 20) -> list[dict]:
-    """Uses idx_raw_deliveries_status(status, created_at DESC)."""
+    """Uses idx_raw_deliveries_created(created_at DESC) — fast ordered scan at any data size."""
     rows = list(cluster.query(
         f"""SELECT META(d).id AS doc_id, d.*
             FROM `{CB_BUCKET}`.`{SCOPE_RAW}`.`deliveries` d
-                USE INDEX (idx_raw_deliveries_status)
-            WHERE d.status IS NOT MISSING
+                USE INDEX (idx_raw_deliveries_created)
+            WHERE d.created_at IS NOT MISSING
             ORDER BY d.created_at DESC
             LIMIT $limit""",
         limit=limit,
     ))
     return rows
+
+
+def get_raw_delivery_by_scenario(cluster: Cluster, scenario: str) -> dict | None:
+    """Fetch any raw delivery matching a scenario_type. LIMIT 1, no sort — sub-second."""
+    rows = list(cluster.query(
+        f"""SELECT META(d).id AS doc_id, d.*
+            FROM `{CB_BUCKET}`.`{SCOPE_RAW}`.`deliveries` d
+            WHERE d.scenario_type = $scenario
+            LIMIT 1""",
+        scenario=scenario,
+    ))
+    return rows[0] if rows else None
 
 
 def get_processed_deliveries(cluster: Cluster, limit: int = 20) -> list[dict]:
@@ -94,6 +109,7 @@ def get_ai_ready_count(cluster: Cluster) -> int:
         rows = list(cluster.query(
             f"""SELECT COUNT(*) AS cnt
                 FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
+                    USE INDEX (idx_proc_deliveries_aiready)
                 WHERE d.is_ai_ready = true"""
         ))
         return rows[0]["cnt"] if rows else 0
@@ -115,18 +131,18 @@ def ensure_vector_index(cluster: Cluster) -> tuple[bool, str]:
     # 1. Check if index already exists
     try:
         rows = list(cluster.query(
-            "SELECT state FROM system:indexes WHERE name = 'idx_delivery_embedding'"
+            "SELECT state FROM system:indexes WHERE name = 'idx_delivery_vectors'"
         ))
         if rows:
             state = rows[0].get("state", "")
             if state == "online":
                 return True, ""
-            if state in ("building", "deferred", "scheduled"):
+            if state in ("building", "deferred", "scheduled", "pending"):
                 return False, "Vector index is building... Search will be available shortly."
             # Index in "error" or unknown state → drop and attempt recreation
             try:
                 list(cluster.query(
-                    f"DROP INDEX `idx_delivery_embedding` ON "
+                    f"DROP INDEX `idx_delivery_vectors` ON "
                     f"`{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`"
                 ))
             except CouchbaseException:
@@ -145,7 +161,7 @@ def ensure_vector_index(cluster: Cluster) -> tuple[bool, str]:
     # 3. Enough data — create the IVF,SQ8 index (async build on server side)
     try:
         list(cluster.query(f"""
-            CREATE VECTOR INDEX `idx_delivery_embedding`
+            CREATE VECTOR INDEX `idx_delivery_vectors`
             ON `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries`(embedding VECTOR)
             WITH {{"dimension": 1536, "similarity": "COSINE", "description": "IVF,SQ8"}}
         """))
@@ -310,6 +326,7 @@ def vector_search_with_filters(cluster: Cluster, query_embedding: list[float],
     display_query = f"""SELECT META(d).id, d.id, d.owner_name, d.address,
        d.status, d.scenario_type, d.knowledge_summary, d.risk_assessment,
        d.carrier, d.risk_score, d.delivery_location,
+       d.event_timeline, d.risk_factors,
        APPROX_VECTOR_DISTANCE(d.embedding, $query_vec, "COSINE") AS score
 FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
 WHERE {where_clause}
@@ -323,6 +340,7 @@ LIMIT {limit};
         f"""SELECT META(d).id AS doc_id, d.id, d.owner_name, d.address,
                    d.status, d.scenario_type, d.knowledge_summary, d.risk_assessment,
                    d.carrier, d.risk_score, d.delivery_location,
+                   d.event_timeline, d.risk_factors,
                    APPROX_VECTOR_DISTANCE(d.embedding, $vec, "COSINE") AS distance
             FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
             WHERE {where_clause}
