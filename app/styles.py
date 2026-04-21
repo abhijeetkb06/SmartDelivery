@@ -137,12 +137,15 @@ header { visibility: hidden; }
 .before-after-container { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; }
 .before-card { flex: 1; background: linear-gradient(135deg, rgba(30,41,59,0.85), rgba(15,23,42,0.90)); border: 1px solid rgba(251,191,36,0.2); border-left: 4px solid #fbbf24; border-radius: 12px; padding: 1.25rem; }
 .after-card { flex: 1; background: linear-gradient(135deg, rgba(30,41,59,0.85), rgba(15,23,42,0.90)); border: 1px solid rgba(34,197,94,0.25); border-left: 4px solid #22c55e; border-radius: 12px; padding: 1.25rem; box-shadow: 0 0 20px rgba(34,197,94,0.08); }
+.after-card-risk { flex: 1; background: linear-gradient(135deg, rgba(30,41,59,0.85), rgba(15,23,42,0.90)); border: 1px solid rgba(239,68,68,0.25); border-left: 4px solid #ef4444; border-radius: 12px; padding: 1.25rem; box-shadow: 0 0 20px rgba(239,68,68,0.08); }
 .ba-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; padding-bottom: 0.4rem; border-bottom: 1px solid rgba(100,116,139,0.2); }
 .ba-label-before { color: #fbbf24; }
 .ba-label-after { color: #4ade80; }
+.ba-label-after-risk { color: #f87171; }
 .ba-notification { border-radius: 10px; padding: 0.8rem 1rem; margin-top: 0.5rem; }
 .ba-notif-plain { background: rgba(15,23,42,0.3); border: 1px solid rgba(100,116,139,0.1); }
 .ba-notif-smart { background: rgba(34,197,94,0.05); border: 1px solid rgba(34,197,94,0.15); }
+.ba-notif-smart-risk { background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.15); }
 
 /* ── Alert Banners ── */
 .alert-banner { border-radius: 10px; padding: 0.8rem 1rem; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.75rem; }

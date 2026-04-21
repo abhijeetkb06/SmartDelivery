@@ -64,6 +64,15 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
 
     location = delivery.get("delivery_location", "garage").replace("_", " ").title()
 
+    # Risk-aware styling: red when delivery needs attention, green when safe
+    needs_attention = risk_score >= 0.45
+    after_card_cls = "after-card-risk" if needs_attention else "after-card"
+    after_label_cls = "ba-label-after-risk" if needs_attention else "ba-label-after"
+    after_notif_cls = "ba-notif-smart-risk" if needs_attention else "ba-notif-smart"
+    alert_color = "#f87171" if needs_attention else "#4ade80"
+    alert_title = "Smart Delivery Alert" if needs_attention else "Smart Delivery Update"
+    alert_icon = icon("shield-alert", size=15, color=alert_color) if needs_attention else icon("package", size=15, color=alert_color)
+
     return f"""<div class="before-after-container">
         <div class="before-card">
             <div class="ba-label ba-label-before">Today's myQ</div>
@@ -75,11 +84,11 @@ def create_notification_comparison_html(delivery: dict | None = None) -> str:
                     <div style="font-size:0.72rem;color:#94a3b8;line-height:1.5;">
                         Just raw events. No context. Was it a delivery? A burglar?
                         Is the door still open? You don't know.</div></div></div></div>
-        <div class="after-card">
-            <div class="ba-label ba-label-after">myQ + Couchbase Intelligence</div>
-            <div class="ba-notification ba-notif-smart">
-                <div style="font-size:0.82rem;font-weight:600;color:#4ade80;margin-bottom:0.5rem;">
-                    {icon("package", size=15, color="#4ade80")} Smart Delivery Alert</div>
+        <div class="{after_card_cls}">
+            <div class="ba-label {after_label_cls}">myQ + Couchbase Intelligence</div>
+            <div class="ba-notification {after_notif_cls}">
+                <div style="font-size:0.82rem;font-weight:600;color:{alert_color};margin-bottom:0.5rem;">
+                    {alert_icon} {alert_title}</div>
                 <div style="font-size:0.85rem;color:#e2e8f0;line-height:1.5;">
                     {knowledge}</div>
                 <div style="margin-top:0.6rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
