@@ -8,7 +8,7 @@ A real-time IoT delivery event processing pipeline that demonstrates how Couchba
 
 ## What It Does
 
-This demo simulates a fleet of 200+ smart garage homes processing package deliveries in real time. Events flow through Couchbase Eventing for automatic PII redaction, data enrichment, and vector embedding generation -- all serverless, all inside the database.
+This demo simulates a fleet of 100K smart garage homes processing package deliveries in real time. Events flow through Couchbase Eventing for automatic PII redaction, data enrichment, and vector embedding generation -- all serverless, all inside the database.
 
 **Six delivery scenarios** run continuously:
 - Happy path delivery
