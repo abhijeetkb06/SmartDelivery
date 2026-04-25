@@ -42,7 +42,7 @@ Semantic delivery search using Couchbase Vector Search with `APPROX_VECTOR_DISTA
 ## Architecture
 
 ```
-Go Event Generator (3,000+ ops/sec)
+Go Event Generator (50,000+ ops/sec)
         |
         v
   Couchbase Capella
