@@ -71,7 +71,7 @@ elif selected_tab == "myQ Command Center":
     metrics = cb.get_pipeline_metrics(cluster)
     gen_live = (metrics and metrics.get("running", False)) or st.session_state.get("gen_starting", False)
     if gen_live:
-        st_autorefresh(interval=3000, key="ops_autorefresh")
+        st_autorefresh(interval=config.AUTO_REFRESH_MS, key="ops_autorefresh")
         # Clear the starting flag once metrics confirm the generator is live
         if metrics and metrics.get("running", False):
             st.session_state.pop("gen_starting", None)

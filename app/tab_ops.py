@@ -5,6 +5,7 @@ from datetime import timedelta
 import logging
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import threading
@@ -17,7 +18,9 @@ from couchbase.options import ClusterOptions, ClusterTimeoutOptions
 from couchbase.exceptions import CouchbaseException
 
 import couchbase_client as cb
-from config import CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_PROCESSED
+from config import (CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_PROCESSED,
+                     GENERATOR_RATE, GENERATOR_WORKERS, GENERATOR_BATCH, GENERATOR_COUNT,
+                     HOMES_COUNT)
 from styles import icon
 
 _SEVERITY_COLORS = {"critical": "#ef4444", "high": "#f97316", "medium": "#fbbf24", "low": "#6366f1"}
@@ -120,24 +123,48 @@ def _start_vector_index_watcher():
     _log.info("[VectorWatcher] Background thread started.")
 
 
-def _start_generator(cluster: Cluster):
-    """Launch Go event generator as a background process."""
+def _start_generator(cluster: Cluster) -> bool:
+    """Launch Go event generator as a background process.
+
+    Auto-builds the binary if missing and Go is installed.
+    Returns True on successful launch, False on failure.
+    """
+    # Auto-build if binary is missing
     if not _GEN_BIN.exists():
-        st.error(f"Event generator binary not found at {_GEN_BIN}. Please build it first.")
-        return
+        if not shutil.which("go"):
+            st.session_state["gen_error"] = (
+                "Go is not installed and the event generator binary is missing. "
+                "Install Go 1.21+ from https://go.dev/dl/ then restart the dashboard, "
+                "or build manually: `cd event-generator && go build -o smart-delivery-gen .`"
+            )
+            return False
+        with st.spinner("Compiling event generator (first run only)..."):
+            result = subprocess.run(
+                ["go", "build", "-o", "smart-delivery-gen", "."],
+                cwd=_GEN_BIN.parent,
+                capture_output=True, text=True, timeout=120,
+            )
+        if result.returncode != 0 or not _GEN_BIN.exists():
+            st.session_state["gen_error"] = f"Go build failed: {result.stderr.strip()}"
+            return False
+
+    st.session_state.pop("gen_error", None)
     try:
         proc = subprocess.Popen(
-            [str(_GEN_BIN), "--continuous", "--rate", "5000", "--workers", "50", "--batch", "200", "--count", "1000000"],
+            [str(_GEN_BIN), "--continuous",
+             "--rate", str(GENERATOR_RATE), "--workers", str(GENERATOR_WORKERS),
+             "--batch", str(GENERATOR_BATCH), "--count", str(GENERATOR_COUNT)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
         st.session_state["gen_pid"] = proc.pid
     except Exception as e:
-        st.error(f"Failed to start event generator: {e}")
-        return
+        st.session_state["gen_error"] = f"Failed to start event generator: {e}"
+        return False
     # Kick off background vector index creation (waits 30s, then auto-creates when ready)
     _start_vector_index_watcher()
+    return True
 
 
 def _stop_generator(cluster: Cluster):
@@ -204,7 +231,7 @@ def render(cluster: Cluster):
             proc_stats = cb.get_processing_stats(cluster)
             st.session_state["_ops_stats_cache"] = {"proc_stats": proc_stats, "_ts": now}
         ai_ready = proc_stats.get("processed_count", 0)
-        homes_count = 1_000_000  # Hardcoded — homes are not stored in Couchbase
+        homes_count = HOMES_COUNT
     else:
         if cache_fresh and "counts" in cache:
             counts = cache["counts"]
@@ -220,7 +247,7 @@ def render(cluster: Cluster):
             }
         total_deliveries = counts.get('rawdata.deliveries', 0)
         total_alerts = counts.get('rawdata.alerts', 0)
-        homes_count = 1_000_000  # Hardcoded — homes are not stored in Couchbase
+        homes_count = HOMES_COUNT
 
     st.markdown('<div class="section-title">myQ Command Center</div>', unsafe_allow_html=True)
 
@@ -231,13 +258,14 @@ def render(cluster: Cluster):
             if st.button("Stop Event Stream", type="secondary", use_container_width=True):
                 _stop_generator(cluster)
                 st.session_state.pop("gen_starting", None)
+                st.session_state.pop("gen_error", None)
                 st.rerun()
         else:
             if st.button("Start Event Stream", type="primary", use_container_width=True):
-                _start_generator(cluster)
-                # Flag so auto-refresh kicks in before first metrics doc arrives
-                st.session_state["gen_starting"] = True
-                st.rerun()
+                if _start_generator(cluster):
+                    # Flag so auto-refresh kicks in before first metrics doc arrives
+                    st.session_state["gen_starting"] = True
+                    st.rerun()
     with status_col:
         if is_live:
             rate = metrics.get("actual_rate", 0) or 0
@@ -250,8 +278,13 @@ def render(cluster: Cluster):
         else:
             st.markdown(
                 '<div style="padding:0.5rem 0;font-size:0.82rem;color:#64748b;">'
-                'Click <b>Start Event Stream</b> to begin ingesting delivery events at 5,000/sec.</div>',
+                f'Click <b>Start Event Stream</b> to begin ingesting delivery events at {GENERATOR_RATE:,}/sec.</div>',
                 unsafe_allow_html=True)
+
+    # Show persistent error if generator failed to start
+    gen_error = st.session_state.get("gen_error")
+    if gen_error:
+        st.error(gen_error)
 
     # Show LIVE indicator when generator is running
     if is_live:

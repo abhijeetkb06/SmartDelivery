@@ -12,6 +12,7 @@ import os
 import sys
 import time
 import logging
+import tomllib
 from datetime import timedelta
 from pathlib import Path
 
@@ -23,12 +24,17 @@ from couchbase.exceptions import CouchbaseException
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+_project_root = Path(__file__).resolve().parent.parent
+with open(_project_root / "settings.toml", "rb") as _f:
+    _cfg = tomllib.load(_f)
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
                     datefmt="%H:%M:%S")
 log = logging.getLogger("vector-index")
 
-BUCKET = os.getenv("CB_BUCKET", "smartdelivery")
+BUCKET = os.getenv("CB_BUCKET") or _cfg["database"]["bucket"]
 INDEX_NAME = "idx_delivery_vectors"
+_VECTOR_THRESHOLD = _cfg["vector"]["index_threshold"]
 
 
 def main():
@@ -61,8 +67,8 @@ def main():
         ai_ready = rows[0]["cnt"] if rows else 0
         log.info("AI-ready docs: %d", ai_ready)
 
-        if ai_ready < 200:
-            log.error("Need at least 200 AI-ready docs. Run the event generator first.")
+        if ai_ready < _VECTOR_THRESHOLD:
+            log.error("Need at least %d AI-ready docs. Run the event generator first.", _VECTOR_THRESHOLD)
             sys.exit(1)
 
         # 3. Create the index

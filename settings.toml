@@ -1,0 +1,30 @@
+# SmartDelivery — Operational Configuration
+# Secrets (passwords, API keys) stay in .env
+
+# ── Safe to change: tune these before a demo ──────────────────
+
+[database]
+bucket = "smartdelivery"       # bucket name created by reset_bucket.sh
+
+[generator]
+rate = 5000                    # deliveries/sec — increase for higher throughput demos
+workers = 50                   # parallel goroutines — scale with rate
+batch = 200                    # docs per bulk write
+count = 1000000               # max deliveries to generate (0 = unlimited)
+
+[dashboard]
+port = 8503                    # Streamlit server port
+auto_refresh_ms = 3000         # Command Center live refresh interval (do not lower below 2000)
+
+[demo]
+homes_count = 100000            # simulated home count shown in Command Center
+
+# ── Do not change unless you know what you're doing ───────────
+
+[vector]
+index_threshold = 200          # min AI-ready docs before IVF index builds
+                               # lowering this causes poor vector search quality
+
+[ai]
+embedding_model = "text-embedding-3-small"   # must match eventing function config
+chat_model = "gpt-4o-mini"                   # used for RAG copilot responses

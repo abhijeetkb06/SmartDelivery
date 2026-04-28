@@ -9,6 +9,7 @@ import os
 import sys
 import time
 import logging
+import tomllib
 from datetime import timedelta
 from pathlib import Path
 
@@ -33,10 +34,14 @@ from couchbase.management.eventing import (
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+_project_root = Path(__file__).resolve().parent.parent
+with open(_project_root / "settings.toml", "rb") as _f:
+    _cfg = tomllib.load(_f)
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-BUCKET = os.getenv("CB_BUCKET", "smartdelivery")
+BUCKET = os.getenv("CB_BUCKET") or _cfg["database"]["bucket"]
 SCOPES = {
     "rawdata": ["homes", "events", "deliveries", "alerts"],
     "processeddata": ["deliveries"],

@@ -55,7 +55,7 @@ Go Event Generator (50,000+ ops/sec)
   |    - Scenario classification            |
   |    - Vector embedding generation        |
   |       |                                 |
-  |  FTS + Vector Search Index              |
+  |  Vector Search Index (APPROX_VECTOR_DISTANCE) |
   |  N1QL Analytics                         |
   +-----------------------------------------+
         |
@@ -93,7 +93,6 @@ go build -o smart-delivery-gen .
 |---------|---------|
 | **KV** | Sub-millisecond document reads/writes for delivery events |
 | **Eventing** | Serverless PII redaction, data enrichment, vector embedding triggers |
-| **FTS** | Full-text search across millions of delivery events |
 | **Vector Search** | Semantic similarity search with `APPROX_VECTOR_DISTANCE` |
 | **N1QL** | Ad-hoc SQL++ analytics and aggregations |
 
@@ -103,7 +102,7 @@ go build -o smart-delivery-gen .
 
 ### Prerequisites
 - Python 3.11+
-- Go 1.21+
+- Go 1.21+ (needed to compile the event generator binary -- see below)
 - Couchbase Capella cluster (or self-managed 7.6+)
 - OpenAI API key (for embeddings + RAG)
 
@@ -124,16 +123,38 @@ cp .env.example .env
 # Edit .env with your credentials
 ```
 
+### Building the Event Generator
+
+The Go event generator binary (`event-generator/smart-delivery-gen`) is not checked into git and must be compiled after cloning. `run_dashboard.sh`, `run_generator.sh`, and the Streamlit dashboard all **auto-build** it if Go is on your PATH.
+
+To build manually:
+
+```bash
+cd event-generator
+go build -o smart-delivery-gen .
+cd ..
+```
+
+Verify it works:
+
+```bash
+./event-generator/smart-delivery-gen --help
+```
+
 ### Environment Configuration
 
-After copying `.env.example` to `.env`, fill in all values. The `.env` file is gitignored -- you must create it manually after every fresh clone.
+Configuration is split into two files:
+
+- **`.env`** -- Secrets only (passwords, API keys). Gitignored -- you must create it after every fresh clone.
+- **`settings.toml`** -- Operational config (bucket name, generator rate, AI models, dashboard port). Checked into git -- works out of the box.
+
+After copying `.env.example` to `.env`, fill in your credentials:
 
 ```bash
 # ── Couchbase Capella Connection ──
 CB_CONN_STR=couchbases://cb.<your-cluster>.cloud.couchbase.com
 CB_USERNAME=<username>
 CB_PASSWORD=<password>
-CB_BUCKET=smartdelivery
 
 # ── Capella Management API ──
 CAPELLA_API_KEY=<capella-api-key>
@@ -143,6 +164,22 @@ CAPELLA_API_SECRET=<capella-api-secret-base64>
 OPENAI_API_KEY=<openai-api-key>
 ```
 
+Operational settings are in `settings.toml` (no need to edit unless you want to tune):
+
+```toml
+[generator]
+rate = 5000           # deliveries/sec
+workers = 50          # parallel goroutines
+batch = 200           # docs per bulk write
+
+[ai]
+embedding_model = "text-embedding-3-small"
+chat_model = "gpt-4o-mini"
+
+[dashboard]
+port = 8503
+```
+
 **Where to get each value:**
 
 | Variable | Where to find it |
@@ -150,7 +187,6 @@ OPENAI_API_KEY=<openai-api-key>
 | `CB_CONN_STR` | Capella UI -> Cluster -> Connect -> Connection String (starts with `couchbases://`) |
 | `CB_USERNAME` | Capella UI -> Cluster -> Settings -> Database Access -> create a database user |
 | `CB_PASSWORD` | Set when creating the database user above |
-| `CB_BUCKET` | Leave as `smartdelivery` (created automatically by `reset_bucket.sh`) |
 | `CAPELLA_API_KEY` | Capella UI -> Settings (org level) -> API Keys -> Create API Key -> copy the Key ID |
 | `CAPELLA_API_SECRET` | Shown once when creating the API key -- copy the base64-encoded secret token |
 | `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) -> Create new secret key |

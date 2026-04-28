@@ -8,7 +8,7 @@ from couchbase.cluster import Cluster
 from couchbase.options import ClusterOptions, ClusterTimeoutOptions
 from couchbase.exceptions import CouchbaseException, DocumentNotFoundException
 
-from config import CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_RAW, SCOPE_PROCESSED
+from config import CB_CONN_STR, CB_USERNAME, CB_PASSWORD, CB_BUCKET, SCOPE_RAW, SCOPE_PROCESSED, VECTOR_INDEX_THRESHOLD
 
 
 def get_cluster() -> Cluster:
@@ -103,7 +103,6 @@ def get_ai_ready_count(cluster: Cluster) -> int:
 
 
 # ── Vector index auto-management ───────────────────────────────
-VECTOR_INDEX_THRESHOLD = 200  # minimum AI-ready docs before IVF index can reliably build
 
 
 def ensure_vector_index(cluster: Cluster) -> tuple[bool, str]:
@@ -139,8 +138,8 @@ def ensure_vector_index(cluster: Cluster) -> tuple[bool, str]:
     ai_ready = get_ai_ready_count(cluster)
     if ai_ready < VECTOR_INDEX_THRESHOLD:
         return False, (
-            f"Waiting for embeddings — {ai_ready}/{VECTOR_INDEX_THRESHOLD} AI-ready docs. "
-            f"The VectorEmbeddingPipeline will generate them automatically."
+            "Waiting for embeddings — AI-ready docs. "
+            "The VectorEmbeddingPipeline will generate them automatically."
         )
 
     # 3. Enough data — create the IVF,SQ8 index (async build on server side)
