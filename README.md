@@ -119,10 +119,51 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Configure
+# Configure (see Environment Configuration below)
 cp .env.example .env
-# Edit .env with your Couchbase and OpenAI credentials
+# Edit .env with your credentials
+```
 
+### Environment Configuration
+
+After copying `.env.example` to `.env`, fill in all values. The `.env` file is gitignored -- you must create it manually after every fresh clone.
+
+```bash
+# ── Couchbase Capella Connection ──
+CB_CONN_STR=couchbases://cb.<your-cluster>.cloud.couchbase.com
+CB_USERNAME=<username>
+CB_PASSWORD=<password>
+CB_BUCKET=smartdelivery
+
+# ── Capella Management API ──
+CAPELLA_API_KEY=<capella-api-key>
+CAPELLA_API_SECRET=<capella-api-secret-base64>
+
+# ── OpenAI ──
+OPENAI_API_KEY=<openai-api-key>
+```
+
+**Where to get each value:**
+
+| Variable | Where to find it |
+|----------|-----------------|
+| `CB_CONN_STR` | Capella UI -> Cluster -> Connect -> Connection String (starts with `couchbases://`) |
+| `CB_USERNAME` | Capella UI -> Cluster -> Settings -> Database Access -> create a database user |
+| `CB_PASSWORD` | Set when creating the database user above |
+| `CB_BUCKET` | Leave as `smartdelivery` (created automatically by `reset_bucket.sh`) |
+| `CAPELLA_API_KEY` | Capella UI -> Settings (org level) -> API Keys -> Create API Key -> copy the Key ID |
+| `CAPELLA_API_SECRET` | Shown once when creating the API key -- copy the base64-encoded secret token |
+| `OPENAI_API_KEY` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) -> Create new secret key |
+
+**Capella cluster prerequisites (do these before running any scripts):**
+
+1. **IP Whitelist** -- Capella UI -> Cluster -> Settings -> Allowed IP Addresses -> Add your IP (or `0.0.0.0/0` for demo)
+2. **Database user** -- Capella UI -> Cluster -> Settings -> Database Access -> Create Credentials (read/write on all buckets)
+3. **Management API key** -- Capella UI -> Settings -> API Keys -> Create API Key (Organization Owner or Project Owner role)
+
+### Running the Demo
+
+```bash
 # Create bucket, scopes, collections, indexes, and deploy eventing
 ./reset_bucket.sh
 
