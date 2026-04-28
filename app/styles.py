@@ -259,12 +259,6 @@ def risk_badge(score: float) -> str:
     return f'<span class="badge {cls}">Risk: {score:.0%}</span>'
 
 
-def ai_badge(is_ready: bool) -> str:
-    if is_ready:
-        return '<span class="badge badge-ai">AI Ready</span>'
-    return '<span class="badge badge-info">Processing</span>'
-
-
 def risk_bar_html(score: float) -> str:
     pct = score * 100
     if score >= 0.75:
@@ -323,31 +317,7 @@ def icon(name: str, size: int = 16, color: str = "currentColor") -> str:
     )
 
 
-# ── Icon / name helpers ─────────────────────────────────────────
-_EVENT_ICONS = {
-    "delivery_window_start": "clock",
-    "delivery_window_end": "clock",
-    "person_detected": "user",
-    "unknown_person": "user-x",
-    "door_open": "door-open",
-    "door_close": "lock",
-    "door_stuck": "alert-triangle",
-    "camera_motion": "camera",
-    "package_detected": "package",
-    "package_not_detected": "x-circle",
-    "delivery_confirmed": "check-circle",
-    "delivery_timeout": "clock",
-}
-
-_EVENT_COLORS = {
-    "delivery_window_start": "#64748b", "delivery_window_end": "#64748b",
-    "person_detected": "#fbbf24", "unknown_person": "#f97316",
-    "door_open": "#6366f1", "door_close": "#6366f1", "door_stuck": "#ef4444",
-    "camera_motion": "#22d3ee", "package_detected": "#22c55e",
-    "package_not_detected": "#ef4444", "delivery_confirmed": "#22c55e",
-    "delivery_timeout": "#ef4444",
-}
-
+# ── Scenario icon / name helpers ─────────────────────────────────
 _SCENARIO_ICONS = {
     "happy_path": "check-circle",
     "front_door_misdelivery": "home",
@@ -375,14 +345,6 @@ _SCENARIO_NAMES = {
     "theft_suspicious": "Suspicious Activity",
 }
 
-
-def event_icon(event_type: str, size: int = 16) -> str:
-    name = _EVENT_ICONS.get(event_type, "clipboard")
-    color = _EVENT_COLORS.get(event_type, "#6366f1")
-    return icon(name, size=size, color=color)
-
-def event_color(event_type: str) -> str:
-    return _EVENT_COLORS.get(event_type, "#6366f1")
 
 def scenario_icon(scenario_type: str, size: int = 16) -> str:
     name = _SCENARIO_ICONS.get(scenario_type, "package")

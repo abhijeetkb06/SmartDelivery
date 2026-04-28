@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 from datetime import timedelta
-from typing import Any
 
 from couchbase.auth import PasswordAuthenticator
 from couchbase.cluster import Cluster
@@ -75,20 +74,6 @@ def get_raw_delivery_by_scenario(cluster: Cluster, scenario: str) -> dict | None
         scenario=scenario,
     ))
     return rows[0] if rows else None
-
-
-def get_processed_deliveries(cluster: Cluster, limit: int = 20) -> list[dict]:
-    """Uses idx_proc_deliveries_status(status, created_at DESC)."""
-    rows = list(cluster.query(
-        f"""SELECT META(d).id AS doc_id, d.*
-            FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
-                USE INDEX (idx_proc_deliveries_status)
-            WHERE d.status IS NOT MISSING
-            ORDER BY d.created_at DESC
-            LIMIT $limit""",
-        limit=limit,
-    ))
-    return rows
 
 
 def get_delivery_by_id(cluster: Cluster, scope: str, doc_id: str) -> dict | None:
@@ -175,27 +160,6 @@ def ensure_vector_index(cluster: Cluster) -> tuple[bool, str]:
         return False, f"Vector index creation pending: {e}"
 
 
-# ── Vector search via SQL++ APPROX_VECTOR_DISTANCE ─────────────
-def vector_search(cluster: Cluster, query_embedding: list[float], limit: int = 5) -> list[dict]:
-    """Semantic vector search using Couchbase Hyperscale Vector Index."""
-    rows = list(cluster.query(
-        f"""SELECT META(d).id AS doc_id, d.id, d.owner_name, d.address,
-                   d.status, d.scenario_type, d.carrier, d.risk_score,
-                   d.knowledge_summary, d.risk_assessment,
-                   d.delivery_location, d.is_ai_ready,
-                   APPROX_VECTOR_DISTANCE(d.embedding, $vec, "COSINE") AS distance
-            FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
-            WHERE d.is_ai_ready = true
-            ORDER BY APPROX_VECTOR_DISTANCE(d.embedding, $vec, "COSINE")
-            LIMIT $lim""",
-        vec=query_embedding,
-        lim=limit,
-    ))
-    for row in rows:
-        row["similarity"] = round(1.0 - row.get("distance", 0), 6)
-    return rows
-
-
 # ── Recent processed deliveries (for homeowner view) ──────────
 def get_recent_processed_deliveries(cluster: Cluster, limit: int = 20) -> list[dict]:
     """Uses idx_proc_deliveries_status(status, created_at DESC)."""
@@ -253,48 +217,6 @@ def get_recent_alerts(cluster: Cluster, severity: str = "", limit: int = 20) -> 
     # Sort the combined set by triggered_at descending
     combined.sort(key=lambda x: x.get("triggered_at", ""), reverse=True)
     return combined[:limit]
-
-
-# ── Filtered search ────────────────────────────────────────────
-def search_deliveries(cluster: Cluster, status: str = "", scenario: str = "",
-                      risk_level: str = "", limit: int = 20) -> list[dict]:
-    """Uses idx_proc_deliveries_status / scenario_status / risk composites."""
-    conditions = []
-    # Pick the best index hint based on the primary filter
-    if status:
-        conditions.append(f"d.status = '{status}'")
-        idx_hint = "idx_proc_deliveries_status"
-    elif scenario:
-        idx_hint = "idx_proc_deliveries_scenario_status"
-    elif risk_level:
-        idx_hint = "idx_proc_deliveries_risk"
-    else:
-        idx_hint = "idx_proc_deliveries_status"
-
-    if scenario:
-        conditions.append(f"d.scenario_type = '{scenario}'")
-    if risk_level == "critical":
-        conditions.append("d.risk_score >= 0.75")
-    elif risk_level == "high":
-        conditions.append("d.risk_score >= 0.45 AND d.risk_score < 0.75")
-    elif risk_level == "medium":
-        conditions.append("d.risk_score >= 0.20 AND d.risk_score < 0.45")
-    elif risk_level == "low":
-        conditions.append("d.risk_score < 0.20")
-
-    if not conditions:
-        conditions.append("d.status IS NOT MISSING")
-
-    where = " AND ".join(conditions)
-    rows = list(cluster.query(
-        f"""SELECT META(d).id AS doc_id, d.*
-            FROM `{CB_BUCKET}`.`{SCOPE_PROCESSED}`.`deliveries` d
-                USE INDEX ({idx_hint})
-            WHERE {where}
-            ORDER BY d.created_at DESC
-            LIMIT {limit}"""
-    ))
-    return rows
 
 
 # ── Vector search with filters (for search tab) ────────────────

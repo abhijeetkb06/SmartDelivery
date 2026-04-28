@@ -16,5 +16,4 @@ SCOPE_RAW = "rawdata"
 SCOPE_PROCESSED = "processeddata"
 
 EMBEDDING_MODEL = "text-embedding-3-small"
-EMBEDDING_DIMS = 1536
 CHAT_MODEL = "gpt-4o-mini"
