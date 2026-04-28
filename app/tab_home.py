@@ -253,7 +253,7 @@ GET `smartdelivery`.`processeddata`.`deliveries`.`{doc_id}`
     st.markdown(f'<div class="section-title">{icon("package", size=18, color="#818cf8")} Recent Delivery Activity</div>',
                 unsafe_allow_html=True)
     st.markdown(
-        '<div class="section-subtitle">Smart notifications powered by AI-generated delivery narratives. '
+        '<div class="section-subtitle">Smart notifications powered by business rules applied to raw sensor events. '
         'Each summary is created automatically by Couchbase Eventing.</div>',
         unsafe_allow_html=True)
 

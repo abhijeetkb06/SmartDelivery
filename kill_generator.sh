@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# kill-generator.sh — Emergency kill switch for the SmartDelivery Go event generator.
-# Usage: ./kill-generator.sh
+# kill_generator.sh — Emergency kill switch for the SmartDelivery Go event generator.
+# Usage: ./kill_generator.sh
 
 set -euo pipefail
 

@@ -123,22 +123,35 @@ pip install -r requirements.txt
 cp .env.example .env
 # Edit .env with your Couchbase and OpenAI credentials
 
+# Create bucket, scopes, collections, indexes, and deploy eventing
+./reset_bucket.sh
+
 # Run the dashboard
-streamlit run app/main.py
+./run_dashboard.sh
 
 # In another terminal -- start the event generator
-cd event-generator
-go build -o smart-delivery-gen .
-./smart-delivery-gen --continuous --workers 40 --batch 100
+./run_generator.sh
 ```
+
+### Demo Scripts
+
+All demo scripts live at the repo root. Run them from the `SmartDelivery/` directory.
+
+| Script | Purpose |
+|--------|---------|
+| `./reset_bucket.sh` | Nuke bucket + eventing, recreate everything from scratch |
+| `./run_dashboard.sh` | Launch Streamlit dashboard + open browser (default port 8503) |
+| `./run_generator.sh` | Build and start Go event generator (5000/sec default) |
+| `./kill_generator.sh` | Emergency kill switch for the generator |
+| `./vector_index.sh` | Create the vector search index (after embeddings exist) |
 
 ### Couchbase Eventing Functions
 
-Deploy the eventing functions from the `eventing/` directory:
+The eventing functions are automatically deployed by `reset_bucket.sh` via `scripts/setup_couchbase.py`.
 - `delivery_knowledge_pipeline.js` -- PII redaction + data enrichment
 - `vector_embedding_pipeline.js` -- Automatic OpenAI embedding generation
 
-See [eventing/DEPLOY.md](eventing/DEPLOY.md) for deployment instructions.
+See [eventing/DEPLOY.md](eventing/DEPLOY.md) for manual deployment instructions.
 
 ---
 
@@ -146,6 +159,11 @@ See [eventing/DEPLOY.md](eventing/DEPLOY.md) for deployment instructions.
 
 ```
 SmartDelivery/
+  reset_bucket.sh            # Nuke + recreate bucket from scratch
+  run_dashboard.sh           # Launch Streamlit dashboard
+  run_generator.sh           # Build & start Go event generator
+  kill_generator.sh          # Emergency kill switch for generator
+  vector_index.sh            # Create vector search index
   app/
     main.py                  # Streamlit entry point (3 tabs)
     tab_home.py              # My myQ -- homeowner dashboard
@@ -165,8 +183,8 @@ SmartDelivery/
     delivery_knowledge_pipeline.js   # PII redaction + enrichment
     vector_embedding_pipeline.js     # Vector embedding generation
   scripts/
-    setup_couchbase.py       # Bucket/scope/collection setup
-    simulate_eventing.py     # Local eventing simulation
+    setup_couchbase.py       # Bucket/scope/collection/index setup
+    vector_index.py          # Vector index creation
 ```
 
 ---
